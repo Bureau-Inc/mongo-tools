@@ -1,5 +1,7 @@
 github.com/3rf/mongo-lint v0.0.0-20140604191638-3550fdcf1f43 h1:0vMGqPI4f0gagBvQrgsQYXKmb6NL2+2WT+AlWCCmb9Q=
 github.com/3rf/mongo-lint v0.0.0-20140604191638-3550fdcf1f43/go.mod h1:ggh9ZlgUveoGPv/xlt2+6f/bGVEl/h+WlV4LX/dyxEI=
+github.com/Bureau-Inc/mongo-tools v1.0.2 h1:bAEyKCT3WMz+oixPVsB96NMdwQYQIDCRGsTtpSAwvGw=
+github.com/Bureau-Inc/mongo-tools v1.0.2/go.mod h1:Z2CQkeY1THClfYihHtpZyNkMB94k10eNAhfaofYeER8=
 github.com/aws/aws-sdk-go v1.22.1/go.mod h1:KmX6BPdI08NWTb3/sm4ZGu5ShLoqVDhKgpiN924inxo=
 github.com/aws/aws-sdk-go v1.44.317 h1:+8XWrLmGMwPPXSRSLPzhgcGnzJ2mYkgkrcB9C/GnSOU=
 github.com/aws/aws-sdk-go v1.44.317/go.mod h1:aVsgQcEevwlmQ7qHE9I3h+dtQgpqhFB+i8Phjh7fkwI=
