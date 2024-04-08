@@ -1,6 +1,8 @@
-module github.com/Bureau-Inc/mongo-tools
+module github.com/mongodb/mongo-tools
 
 go 1.20
+
+replace github.com/mongodb/mongo-tools v0.0.0-20231030165537-eeafc24193c0 => github.com/Bureau-Inc/mongo-tools v1.0.3
 
 require (
 	github.com/3rf/mongo-lint v0.0.0-20140604191638-3550fdcf1f43
@@ -27,7 +29,6 @@ require (
 )
 
 require (
-	github.com/mongodb/mongo-tools v0.0.0-20231030165537-eeafc24193c0
 	github.com/urfave/cli/v2 v2.27.1
 	golang.org/x/exp v0.0.0-20230321023759-10a507213a29
 	golang.org/x/mod v0.16.0
@@ -55,5 +56,3 @@ require (
 	golang.org/x/term v0.18.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
 )
-
-replace github.com/mongodb/mongo-tools v0.0.0-20231030165537-eeafc24193c0 => github.com/Bureau-Inc/mongo-tools v1.0.2
