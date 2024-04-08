@@ -38,8 +38,12 @@ func (csvExporter *CSVExportOutput) ExportDocumentCustom(document bson.D) error 
 				rowOut = append(rowOut, string(buf))
 			}
 		} else if kind := reflect.TypeOf(fieldVal).Kind(); kind == reflect.Float32 || kind == reflect.Float64 {
-			f := fieldVal.(json.NumberFloat)
-			rowOut = append(rowOut, strconv.FormatFloat(float64(f), 'f', -1, 64))
+			f, ok := fieldVal.(json.NumberFloat)
+			if !ok {
+				rowOut = append(rowOut, fmt.Sprintf("%v", fieldVal))
+			} else {
+				rowOut = append(rowOut, strconv.FormatFloat(float64(f), 'f', -1, 64))
+			}
 		} else {
 			rowOut = append(rowOut, fmt.Sprintf("%v", fieldVal))
 		}
