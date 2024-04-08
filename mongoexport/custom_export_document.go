@@ -37,12 +37,9 @@ func (csvExporter *CSVExportOutput) ExportDocumentCustom(document bson.D) error 
 			} else {
 				rowOut = append(rowOut, string(buf))
 			}
-		} else if reflect.TypeOf(fieldVal).Kind() == reflect.Float32 {
-			f := fieldVal.(float32)
+		} else if kind := reflect.TypeOf(fieldVal).Kind(); kind == reflect.Float32 || kind == reflect.Float64 {
+			f := fieldVal.(json.NumberFloat)
 			rowOut = append(rowOut, strconv.FormatFloat(float64(f), 'f', -1, 64))
-		} else if reflect.TypeOf(fieldVal).Kind() == reflect.Float64 {
-			f := fieldVal.(float64)
-			rowOut = append(rowOut, strconv.FormatFloat(f, 'f', -1, 64))
 		} else {
 			rowOut = append(rowOut, fmt.Sprintf("%v", fieldVal))
 		}
