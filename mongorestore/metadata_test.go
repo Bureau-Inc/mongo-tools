@@ -7,16 +7,19 @@
 package mongorestore
 
 import (
+	"context"
 	"fmt"
-	"github.com/stretchr/testify/require"
-	"io/ioutil"
+	"os"
 	"testing"
 
+	"github.com/mongodb/mongo-tools/common/bsonutil"
+	"github.com/mongodb/mongo-tools/common/db"
 	"github.com/mongodb/mongo-tools/common/intents"
 	commonOpts "github.com/mongodb/mongo-tools/common/options"
 	"github.com/mongodb/mongo-tools/common/testtype"
 	"github.com/mongodb/mongo-tools/common/testutil"
 	. "github.com/smartystreets/goconvey/convey"
+	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
 )
 
@@ -39,9 +42,12 @@ func TestMongoRestoreConnectedToAtlasProxy(t *testing.T) {
 		InputOptions:    &InputOptions{RestoreDBUsersAndRoles: false},
 	}
 	session, err := restore.SessionProvider.GetSession()
+	require.NoError(t, err)
 
 	// This case shouldn't error and should instead not return that it will try to restore users and roles.
-	_, err = session.Database("admin").Collection("testcol").InsertOne(nil, bson.M{})
+	_, err = session.Database("admin").
+		Collection("testcol").
+		InsertOne(context.Background(), bson.M{})
 	require.NoError(t, err)
 	require.False(t, restore.ShouldRestoreUsersAndRoles())
 
@@ -50,9 +56,14 @@ func TestMongoRestoreConnectedToAtlasProxy(t *testing.T) {
 	restore.InputOptions.RestoreDBUsersAndRoles = true
 	restore.ToolOptions.DB = "test"
 	err = restore.ParseAndValidateOptions()
-	require.Error(t, err, "cannot restore to the admin database when connected to a MongoDB Atlas free or shared cluster")
+	require.Error(
+		t,
+		err,
+		"cannot restore to the admin database when connected to a MongoDB Atlas free or shared cluster",
+	)
 
-	session.Database("admin").Collection("testcol").Drop(nil)
+	err = session.Database("admin").Collection("testcol").Drop(context.Background())
+	require.NoError(t, err)
 }
 
 func TestCollectionExists(t *testing.T) {
@@ -74,11 +85,17 @@ func TestCollectionExists(t *testing.T) {
 		Convey("and some test data in a server", func() {
 			session, err := restore.SessionProvider.GetSession()
 			So(err, ShouldBeNil)
-			_, insertErr := session.Database(ExistsDB).Collection("one").InsertOne(nil, bson.M{})
+			_, insertErr := session.Database(ExistsDB).
+				Collection("one").
+				InsertOne(context.Background(), bson.M{})
 			So(insertErr, ShouldBeNil)
-			_, insertErr = session.Database(ExistsDB).Collection("two").InsertOne(nil, bson.M{})
+			_, insertErr = session.Database(ExistsDB).
+				Collection("two").
+				InsertOne(context.Background(), bson.M{})
 			So(insertErr, ShouldBeNil)
-			_, insertErr = session.Database(ExistsDB).Collection("three").InsertOne(nil, bson.M{})
+			_, insertErr = session.Database(ExistsDB).
+				Collection("three").
+				InsertOne(context.Background(), bson.M{})
 			So(insertErr, ShouldBeNil)
 
 			Convey("collections that exist should return true", func() {
@@ -100,7 +117,8 @@ func TestCollectionExists(t *testing.T) {
 			})
 
 			Reset(func() {
-				session.Database(ExistsDB).Drop(nil)
+				err = session.Database(ExistsDB).Drop(context.Background())
+				So(err, ShouldBeNil)
 			})
 		})
 
@@ -144,7 +162,10 @@ func TestGetDumpAuthVersion(t *testing.T) {
 					C:        "system.version",
 					Location: "testdata/auth_version_3.bson",
 				}
-				intent.BSONFile = &realBSONFile{path: "testdata/auth_version_3.bson", intent: intent}
+				intent.BSONFile = &realBSONFile{
+					path:   "testdata/auth_version_3.bson",
+					intent: intent,
+				}
 				restore.manager.Put(intent)
 				version, err := restore.GetDumpAuthVersion()
 				So(err, ShouldBeNil)
@@ -158,7 +179,10 @@ func TestGetDumpAuthVersion(t *testing.T) {
 					C:        "system.version",
 					Location: "testdata/auth_version_5.bson",
 				}
-				intent.BSONFile = &realBSONFile{path: "testdata/auth_version_5.bson", intent: intent}
+				intent.BSONFile = &realBSONFile{
+					path:   "testdata/auth_version_5.bson",
+					intent: intent,
+				}
 				restore.manager.Put(intent)
 				version, err := restore.GetDumpAuthVersion()
 				So(err, ShouldBeNil)
@@ -192,7 +216,10 @@ func TestGetDumpAuthVersion(t *testing.T) {
 					C:        "system.version",
 					Location: "testdata/auth_version_3.bson",
 				}
-				intent.BSONFile = &realBSONFile{path: "testdata/auth_version_3.bson", intent: intent}
+				intent.BSONFile = &realBSONFile{
+					path:   "testdata/auth_version_3.bson",
+					intent: intent,
+				}
 				restore.manager.Put(intent)
 				version, err := restore.GetDumpAuthVersion()
 				So(err, ShouldBeNil)
@@ -206,11 +233,40 @@ func TestGetDumpAuthVersion(t *testing.T) {
 					C:        "system.version",
 					Location: "testdata/auth_version_5.bson",
 				}
-				intent.BSONFile = &realBSONFile{path: "testdata/auth_version_5.bson", intent: intent}
+				intent.BSONFile = &realBSONFile{
+					path:   "testdata/auth_version_5.bson",
+					intent: intent,
+				}
 				restore.manager.Put(intent)
 				version, err := restore.GetDumpAuthVersion()
 				So(err, ShouldBeNil)
 				So(version, ShouldEqual, 5)
+			})
+
+			Convey("when system.version does not contain authSchema document", func() {
+				Convey("should return an error for dump server versions pre 8.1.0", func() {
+					restore.dumpServerVersion = db.Version{8, 0, 0}
+					restore.manager = intents.NewIntentManager()
+					intent := &intents.Intent{
+						DB:       "admin",
+						C:        "system.version",
+						Location: "testdata/system.version.no_auth_schema.bson",
+					}
+					intent.BSONFile = &realBSONFile{
+						path:   "testdata/system.version.no_auth_schema.bson",
+						intent: intent,
+					}
+					restore.manager.Put(intent)
+					_, err := restore.GetDumpAuthVersion()
+					So(err, ShouldNotBeNil)
+				})
+
+				Convey("auth version 5 should be detected for dump server version 8.1.0+", func() {
+					restore.dumpServerVersion = db.Version{8, 1, 0}
+					version, err := restore.GetDumpAuthVersion()
+					So(err, ShouldBeNil)
+					So(version, ShouldEqual, 5)
+				})
 			})
 		})
 	})
@@ -254,8 +310,95 @@ func TestIndexGetsSimpleCollation(t *testing.T) {
 	})
 }
 
+func TestAutoIndexIdHandling(t *testing.T) {
+	testtype.SkipUnlessTestType(t, testtype.UnitTestType)
+
+	type testCase struct {
+		version                  db.Version
+		isLocalDB                bool
+		expectAutoIndexIDPresent bool
+	}
+
+	testCases := []testCase{
+		{
+			version:                  db.Version{7, 0, 0},
+			isLocalDB:                false,
+			expectAutoIndexIDPresent: true,
+		},
+		{
+			version:                  db.Version{7, 0, 0},
+			isLocalDB:                true,
+			expectAutoIndexIDPresent: true,
+		},
+		{
+			version:                  db.Version{8, 1, 0},
+			expectAutoIndexIDPresent: true,
+		},
+		{
+			version:                  db.Version{8, 2, 0},
+			expectAutoIndexIDPresent: false,
+		},
+		{
+			version:                  db.Version{9, 0, 0},
+			expectAutoIndexIDPresent: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(
+			fmt.Sprintf("autoIndexId handling with version %s", tc.version.String()),
+			func(t *testing.T) {
+				dbName := "foo"
+				if tc.isLocalDB {
+					dbName = "local"
+				}
+				restore := &MongoRestore{
+					ToolOptions: &commonOpts.ToolOptions{
+						Namespace: &commonOpts.Namespace{
+							DB: dbName,
+						},
+					},
+					serverVersion: tc.version,
+				}
+
+				origCollation := "en"
+				options := bson.D{
+					{"collation", "en"},
+					{"autoIndexId", false},
+				}
+
+				options = restore.UpdateAutoIndexId(options)
+
+				newCollation, err := bsonutil.FindStringValueByKey("collation", &options)
+				require.NoError(t, err)
+
+				require.Equal(
+					t,
+					origCollation,
+					newCollation,
+					"collation is preserved regardless of changes to `autoIndexId` field",
+				)
+
+				if tc.expectAutoIndexIDPresent {
+					autoIndexId, err := bsonutil.FindValueByKey("autoIndexId", &options)
+					require.NoError(t, err)
+
+					if tc.isLocalDB {
+						require.Equal(t, false, autoIndexId)
+					} else {
+						require.Equal(t, true, autoIndexId)
+					}
+				} else {
+					_, err := bsonutil.FindValueByKey("autoIndexId", &options)
+					require.Error(t, err)
+				}
+			},
+		)
+	}
+}
+
 func readCollationTestData(filename string) (bson.D, error) {
-	b, err := ioutil.ReadFile(filename)
+	b, err := os.ReadFile(filename)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't load %s: %v", filename, err)
 	}

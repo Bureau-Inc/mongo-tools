@@ -5,7 +5,7 @@
 // a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
 //
 // Based on github.com/golang/go by The Go Authors
-// See THIRD-PARTY-NOTICES for original license terms.
+// See cyclonedx.sbom.json for original license terms.
 
 package json
 
@@ -109,7 +109,12 @@ func TestStringTag(t *testing.T) {
 		t.Fatalf("Decode: %v", err)
 	}
 	if !reflect.DeepEqual(s, s2) {
-		t.Fatalf("decode didn't match.\nsource: %#v\nEncoded as:\n%s\ndecode: %#v", s, string(got), s2)
+		t.Fatalf(
+			"decode didn't match.\nsource: %#v\nEncoded as:\n%s\ndecode: %#v",
+			s,
+			string(got),
+			s2,
+		)
 	}
 }
 
@@ -420,8 +425,8 @@ func TestStringBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	enc := es.Buffer.String()
-	encBytes := esBytes.Buffer.String()
+	enc := es.String()
+	encBytes := esBytes.String()
 	if enc != encBytes {
 		i := 0
 		for i < len(enc) && i < len(encBytes) && enc[i] == encBytes[i] {

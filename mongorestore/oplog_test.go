@@ -8,7 +8,7 @@ package mongorestore
 
 import (
 	"context"
-	"io/ioutil"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -18,8 +18,10 @@ import (
 	"github.com/mongodb/mongo-tools/common/testtype"
 	"github.com/mongodb/mongo-tools/common/testutil"
 	. "github.com/smartystreets/goconvey/convey"
+	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/x/bsonx/bsoncore"
 )
 
@@ -159,7 +161,8 @@ func TestOplogRestore(t *testing.T) {
 		So(err, ShouldBeNil)
 		defer restore.Close()
 		c1 := session.Database("db1").Collection("c1")
-		c1.Drop(nil)
+		err = c1.Drop(context.Background())
+		So(err, ShouldBeNil)
 
 		// Run mongorestore
 		result := restore.Restore()
@@ -167,10 +170,11 @@ func TestOplogRestore(t *testing.T) {
 		So(result.Failures, ShouldEqual, 0)
 
 		// Verify restoration
-		count, err := c1.CountDocuments(nil, bson.M{})
+		count, err := c1.CountDocuments(context.Background(), bson.M{})
 		So(err, ShouldBeNil)
 		So(count, ShouldEqual, 10)
-		session.Disconnect(context.Background())
+		err = session.Disconnect(context.Background())
+		So(err, ShouldBeNil)
 	})
 }
 
@@ -202,10 +206,11 @@ func TestOplogRestoreWithDuplicateIndexKeys(t *testing.T) {
 		So(result.Failures, ShouldEqual, 0)
 
 		// Verify restoration
-		count, err := coll.CountDocuments(nil, bson.M{})
+		count, err := coll.CountDocuments(context.Background(), bson.M{})
 		So(err, ShouldBeNil)
 		So(count, ShouldEqual, 1)
-		session.Disconnect(context.Background())
+		err = session.Disconnect(context.Background())
+		So(err, ShouldBeNil)
 	})
 }
 
@@ -216,6 +221,7 @@ func TestOplogRestoreUpdatesIndexCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("No server available")
 	}
+	//nolint:errcheck
 	defer session.Disconnect(context.Background())
 
 	Convey("Index drop in oplog should delete it from indexCatalog", t, func() {
@@ -491,7 +497,10 @@ func TestOplogRestoreMaxDocumentSize(t *testing.T) {
 	}
 
 	c1 := session.Database("db1").Collection("c1")
-	c1.Drop(nil)
+	err = c1.Drop(context.Background())
+	if err != nil {
+		t.Fatal("Could not drop db1.c1")
+	}
 
 	Convey("With a test MongoRestore replay oplog with a 16 MiB document", t, func() {
 		// Generate an oplog document and verify that size exceeds 16 MiB.
@@ -500,7 +509,7 @@ func TestOplogRestoreMaxDocumentSize(t *testing.T) {
 		So(len(oplogBytes), ShouldBeGreaterThan, db.MaxBSONSize)
 
 		// Temporarily write the oplog document to testdata/oplogdumpmaxsize/oplog.bson
-		err = ioutil.WriteFile("testdata/oplogdumpmaxsize/oplog.bson", oplogBytes, 0644)
+		err = os.WriteFile("testdata/oplogdumpmaxsize/oplog.bson", oplogBytes, 0644)
 		So(err, ShouldBeNil)
 		defer os.Remove("testdata/oplogdumpmaxsize/oplog.bson")
 
@@ -520,8 +529,11 @@ func TestOplogRestoreMaxDocumentSize(t *testing.T) {
 		defer restore.Close()
 
 		// Make sure to drop the 16 MiB collection before disconnecting.
+		//
+		//nolint:errcheck
 		defer session.Disconnect(context.Background())
-		defer c1.Drop(nil)
+		//nolint:errcheck
+		defer c1.Drop(context.Background())
 
 		// Run mongorestore.
 		result := restore.Restore()
@@ -529,7 +541,7 @@ func TestOplogRestoreMaxDocumentSize(t *testing.T) {
 		So(result.Failures, ShouldEqual, 0)
 
 		// Verify restoration (5 docs in c1.bson + 1 doc in oplog.bson).
-		count, err := c1.CountDocuments(nil, bson.M{})
+		count, err := c1.CountDocuments(context.Background(), bson.M{})
 		So(err, ShouldBeNil)
 		So(count, ShouldEqual, 6)
 	})
@@ -567,7 +579,9 @@ func generateOplogWith16MiBDocument() ([]byte, error) {
 	// Creating the oplog document with the above 16 MiB document will allow
 	// the oplog document to exceed 16 MiB with the additional metadata.
 	var doc bson.D
-	bson.Unmarshal(rawdoc, &doc)
+	if err := bson.Unmarshal(rawdoc, &doc); err != nil {
+		return nil, err
+	}
 	oplog := db.Oplog{
 		Version:   2,
 		Operation: "i",
@@ -670,4 +684,88 @@ func TestShouldIgnoreNamespacee(t *testing.T) {
 			t.Errorf("%s should have been %v but failed\n", testVals.ns, testVals.output)
 		}
 	}
+}
+
+func TestOplogRestoreVectoredInsert(t *testing.T) {
+	testOplogRestoreVectoredInsert(t, true)
+	testOplogRestoreVectoredInsert(t, false)
+}
+
+func testOplogRestoreVectoredInsert(t *testing.T, linked bool) {
+	testtype.SkipUnlessTestType(t, testtype.IntegrationTestType)
+
+	ctx := context.Background()
+
+	session, err := testutil.GetBareSession()
+	if err != nil {
+		t.Fatalf("Failed to get session: %v", err)
+	}
+	//nolint:errcheck
+	defer session.Disconnect(ctx)
+
+	fcv := testutil.GetFCV(session)
+	if cmp, err := testutil.CompareFCV(fcv, "8.0"); err != nil || cmp < 0 {
+		if err != nil {
+			t.Errorf("error getting FCV: %v", err)
+		}
+		t.Skipf("Requires server with FCV 8.0 or later; found %v", fcv)
+	}
+
+	// Prepare the test by creating the necessary collection.
+	require.NoError(t, session.Database("mongodump_test_db").Drop(ctx))
+	require.NoError(t, session.Database("mongodump_test_db").CreateCollection(ctx, "coll1"))
+
+	oplogFileName := "testdata/oplogs/bson/vectored_insert.bson"
+	if linked {
+		oplogFileName = "testdata/oplogs/bson/linked_vectored_inserts.bson"
+	}
+
+	args := []string{
+		DirectoryOption, "testdata/coll_without_index",
+		OplogReplayOption,
+		DropOption,
+		OplogFileOption, oplogFileName,
+	}
+
+	restore, err := getRestoreWithArgs(args...)
+	require.NoError(t, err)
+	defer restore.Close()
+
+	// Run mongorestore
+	result := restore.Restore()
+	require.NoError(t, result.Err)
+	require.Equal(t, int64(0), result.Failures)
+
+	coll := session.Database("mongodump_test_db").Collection("coll1")
+	//defer require.NoError(t, coll.Drop(ctx))
+
+	// Verify restoration
+	cursor, err := coll.Find(ctx, bson.D{}, options.Find().SetSort(bson.D{{"_id", 1}}))
+	require.NoError(t, err)
+	defer cursor.Close(ctx)
+
+	expectedDocs := []bson.D{
+		{{"_id", 100}, {"a", 1}},
+		{{"_id", 200}, {"a", 2}},
+	}
+	if linked {
+		expectedDocs = []bson.D{
+			{{"_id", 300}, {"a", 3}},
+			{{"_id", 400}, {"a", 4}},
+			{{"_id", 500}, {"a", 5}},
+			{{"_id", 600}, {"a", 6}},
+			{{"_id", 700}, {"a", 7}},
+		}
+	}
+
+	i := 0
+	for cursor.Next(ctx) {
+		fmt.Println(cursor.Current)
+		require.Less(t, i, len(expectedDocs))
+		expectedDocRaw, marshalErr := bson.Marshal(expectedDocs[i])
+		require.NoError(t, marshalErr)
+		require.Equal(t, bson.Raw(expectedDocRaw), cursor.Current)
+		i++
+	}
+	require.Equal(t, len(expectedDocs), i)
 }

@@ -8,8 +8,9 @@ package mongorestore
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"io/ioutil"
+	"os"
 	"strings"
 	"testing"
 
@@ -18,10 +19,9 @@ import (
 	"github.com/mongodb/mongo-tools/common/db"
 	"github.com/mongodb/mongo-tools/common/testtype"
 	"github.com/mongodb/mongo-tools/common/testutil"
+	. "github.com/smartystreets/goconvey/convey"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
-
-	. "github.com/smartystreets/goconvey/convey"
 )
 
 // Test files with applyOps transaction entries for
@@ -90,7 +90,8 @@ func TestMongorestoreTxns(t *testing.T) {
 		So(result.Err, ShouldBeNil)
 
 		for k, v := range data {
-			Println("postImageCheck for", k)
+			_, err = Println("postImageCheck for", k)
+			So(err, ShouldBeNil)
 			So(postImageCheck(client, v), ShouldBeNil)
 		}
 	})
@@ -122,7 +123,7 @@ func createTxnTestDataDir(t *testing.T, data txnTestDataMap) string {
 }
 
 func readTxnTestData(filename string) (txnTestDataMap, error) {
-	b, err := ioutil.ReadFile(filename)
+	b, err := os.ReadFile(filename)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't load %s: %v", filename, err)
 	}
@@ -175,7 +176,7 @@ func postImageCheck(client *mongo.Client, c *txnTestDataCase) error {
 			return fmt.Errorf("got unexpected document with _id '%d'", id)
 		}
 		if diff := cmp.Diff(got, want); diff != "" {
-			return fmt.Errorf(diff)
+			return errors.New(diff)
 		}
 		delete(expected, id)
 	}

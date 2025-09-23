@@ -15,7 +15,7 @@ const (
 	// Integration tests require a mongod running on localhost:33333. If your
 	// mongod uses SSL you need to specify the "ssl" type below, and ditto for
 	// if your mongod requires auth.
-	// First checks for a URI for a Mongod in the env variable TOOLS_TESTING_MONGOD. If it does not find it, looks on localhost:33333
+	// First checks for a URI for a Mongod in the env variable TOOLS_TESTING_MONGOD. If it does not find it, looks on localhost:33333.
 	IntegrationTestType = "TOOLS_TESTING_INTEGRATION"
 
 	// Unit tests don't require a real mongod. They may still do file I/O.
@@ -37,11 +37,11 @@ const (
 	// For now mongoreplay tests are unique, and will have to be explicitly run.
 	MongoReplayTestType = "TOOLS_TESTING_REPLAY"
 
-	// For testing options parsing. Requires an SRV URI in the ATLAS_URI environment variable.
-	SRVConnectionStringTestType = "TOOLS_TESTING_SRV"
-
 	// For testing AWS auth via an STS AssumeRole request.
 	AWSAuthTestType = "TOOLS_TESTING_AWS_AUTH"
+
+	// Testing the tools with a replica set topology.
+	ReplSetTestType = "TOOLS_TESTING_REPLSET"
 )
 
 func HasTestType(testType string) bool {

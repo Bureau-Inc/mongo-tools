@@ -33,6 +33,7 @@ func TestBufferedBulkInserterInserts(t *testing.T) {
 			Auth: &auth,
 		}
 		err := opts.NormalizeOptionsAndURI()
+		So(err, ShouldBeNil)
 		provider, err := NewSessionProvider(opts)
 		So(provider, ShouldNotBeNil)
 		So(err, ShouldBeNil)
@@ -40,9 +41,12 @@ func TestBufferedBulkInserterInserts(t *testing.T) {
 		So(session, ShouldNotBeNil)
 		So(err, ShouldBeNil)
 
+		serverVersion, err := provider.ServerVersionArray()
+		So(err, ShouldBeNil)
+
 		Convey("using a test collection and a doc limit of 3", func() {
 			testCol := session.Database("tools-test").Collection("bulk1")
-			bufBulk = NewUnorderedBufferedBulkInserter(testCol, 3)
+			bufBulk = NewUnorderedBufferedBulkInserter(testCol, 3, serverVersion)
 			So(bufBulk, ShouldNotBeNil)
 
 			Convey("inserting 10 documents into the BufferedBulkInserter", func() {
@@ -68,7 +72,7 @@ func TestBufferedBulkInserterInserts(t *testing.T) {
 
 		Convey("using a test collection and a doc limit of 1", func() {
 			testCol := session.Database("tools-test").Collection("bulk2")
-			bufBulk = NewUnorderedBufferedBulkInserter(testCol, 1)
+			bufBulk = NewUnorderedBufferedBulkInserter(testCol, 1, serverVersion)
 			So(bufBulk, ShouldNotBeNil)
 
 			Convey("inserting 10 documents into the BufferedBulkInserter and flushing", func() {
@@ -90,53 +94,56 @@ func TestBufferedBulkInserterInserts(t *testing.T) {
 
 		Convey("using a test collection and a doc limit of 1000", func() {
 			testCol := session.Database("tools-test").Collection("bulk3")
-			bufBulk = NewUnorderedBufferedBulkInserter(testCol, 100)
+			bufBulk = NewUnorderedBufferedBulkInserter(testCol, 100, serverVersion)
 			So(bufBulk, ShouldNotBeNil)
 
-			Convey("inserting 1,000,000 documents into the BufferedBulkInserter and flushing", func() {
+			Convey(
+				"inserting 1,000,000 documents into the BufferedBulkInserter and flushing",
+				func() {
 
-				errCnt := 0
-				for i := 0; i < 1000000; i++ {
-					result, err := bufBulk.Insert(bson.M{"_id": i})
-					if err != nil {
-						errCnt++
+					errCnt := 0
+					for i := 0; i < 1000000; i++ {
+						result, err := bufBulk.Insert(bson.M{"_id": i})
+						if err != nil {
+							errCnt++
+						}
+						if (i+1)%10000 == 0 {
+							So(result, ShouldNotBeNil)
+							So(result.InsertedCount, ShouldEqual, 100)
+						}
 					}
-					if (i+1)%10000 == 0 {
-						So(result, ShouldNotBeNil)
-						So(result.InsertedCount, ShouldEqual, 100)
-					}
-				}
-				So(errCnt, ShouldEqual, 0)
-				_, err := bufBulk.Flush()
-				So(err, ShouldBeNil)
+					So(errCnt, ShouldEqual, 0)
+					_, err := bufBulk.Flush()
+					So(err, ShouldBeNil)
 
-				Convey("should have inserted all of the documents", func() {
-					count, err := testCol.CountDocuments(context.Background(), bson.M{})
-					So(err, ShouldBeNil)
-					So(count, ShouldEqual, 1000000)
+					Convey("should have inserted all of the documents", func() {
+						count, err := testCol.CountDocuments(context.Background(), bson.M{})
+						So(err, ShouldBeNil)
+						So(count, ShouldEqual, 1000000)
 
-					// test values
-					testDoc := bson.M{}
-					result := testCol.FindOne(nil, bson.M{"_id": 477232})
-					err = result.Decode(&testDoc)
-					So(err, ShouldBeNil)
-					So(testDoc["_id"], ShouldEqual, 477232)
-					result = testCol.FindOne(nil, bson.M{"_id": 999999})
-					err = result.Decode(&testDoc)
-					So(err, ShouldBeNil)
-					So(testDoc["_id"], ShouldEqual, 999999)
-					result = testCol.FindOne(nil, bson.M{"_id": 1})
-					err = result.Decode(&testDoc)
-					So(err, ShouldBeNil)
-					So(testDoc["_id"], ShouldEqual, 1)
+						// test values
+						testDoc := bson.M{}
+						result := testCol.FindOne(context.Background(), bson.M{"_id": 477232})
+						err = result.Decode(&testDoc)
+						So(err, ShouldBeNil)
+						So(testDoc["_id"], ShouldEqual, 477232)
+						result = testCol.FindOne(context.Background(), bson.M{"_id": 999999})
+						err = result.Decode(&testDoc)
+						So(err, ShouldBeNil)
+						So(testDoc["_id"], ShouldEqual, 999999)
+						result = testCol.FindOne(context.Background(), bson.M{"_id": 1})
+						err = result.Decode(&testDoc)
+						So(err, ShouldBeNil)
+						So(testDoc["_id"], ShouldEqual, 1)
 
-				})
-			})
+					})
+				},
+			)
 		})
 
 		Convey("using a test collection and a byte limit of 1", func() {
 			testCol := session.Database("tools-test").Collection("bulk4")
-			bufBulk = NewUnorderedBufferedBulkInserter(testCol, 1000)
+			bufBulk = NewUnorderedBufferedBulkInserter(testCol, 1000, serverVersion)
 			So(bufBulk, ShouldNotBeNil)
 			bufBulk.byteLimit = 1
 
@@ -151,7 +158,7 @@ func TestBufferedBulkInserterInserts(t *testing.T) {
 		})
 
 		Reset(func() {
-			provider.DropDatabase("tools-test")
+			So(provider.DropDatabase("tools-test"), ShouldBeNil)
 			provider.Close()
 		})
 	})

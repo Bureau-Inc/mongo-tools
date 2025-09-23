@@ -40,7 +40,10 @@ func TestPlatformsMatchCI(t *testing.T) {
 	}
 
 	for _, v := range config.Variants {
-		if v.Name == "release" || v.Name == "static" || v.Name == "ubuntu-race" {
+		// Variant "mongodump_passthru_v" has been added to support mongodump
+		// passthrough testing.
+		if v.Name == "release" || v.Name == "static" || v.Name == "rhel88-race" ||
+			v.Name == "mongodump_passthru_v" {
 			continue
 		}
 
@@ -61,6 +64,9 @@ func TestPlatformsMatchCI(t *testing.T) {
 	}
 
 	for name, seen := range releasePlatforms {
+		if name == "mongodump_passthru_v" {
+			continue
+		}
 		assert.True(seen, "%s from the list of known platforms is in the evergreen config", name)
 	}
 }
@@ -70,9 +76,7 @@ func TestPlatformsAreSorted(t *testing.T) {
 
 	current := Platforms()
 	var sorted []Platform
-	for _, p := range current {
-		sorted = append(sorted, p)
-	}
+	sorted = append(sorted, current...)
 	sort.SliceStable(sorted, func(i, j int) bool {
 		if sorted[i].Name != sorted[j].Name {
 			return sorted[i].Name < sorted[j].Name
@@ -123,7 +127,8 @@ func TestPlatformCorrectArch(t *testing.T) {
 	for _, p := range platforms {
 		name := p.Name
 		if p.Arch == ArchArm64 || p.Arch == ArchAarch64 {
-			if strings.Contains(name, "rhel") || strings.Contains(name, "amazon") || strings.Contains(name, "suse") {
+			if strings.Contains(name, "rhel") || strings.Contains(name, "amazon") ||
+				strings.Contains(name, "suse") {
 				assert.Equal(t, ArchAarch64, p.Arch, "platform %v need arch %s", p, ArchAarch64)
 			} else if strings.Contains(name, "debian") || strings.Contains(name, "ubuntu") {
 				assert.Equal(t, ArchArm64, p.Arch, "platform %v need arch %s", p, ArchArm64)

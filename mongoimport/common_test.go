@@ -98,16 +98,6 @@ var (
 	}
 )
 
-func convertBSONDToRaw(documents []bson.D) []bson.Raw {
-	rawBSONDocuments := []bson.Raw{}
-	for _, document := range documents {
-		rawBytes, err := bson.Marshal(document)
-		So(err, ShouldBeNil)
-		rawBSONDocuments = append(rawBSONDocuments, rawBytes)
-	}
-	return rawBSONDocuments
-}
-
 func TestValidateFields(t *testing.T) {
 	testtype.SkipUnlessTestType(t, testtype.UnitTestType)
 
@@ -239,7 +229,8 @@ func TestSetNestedDocumentValue(t *testing.T) {
 		Convey("ensure top level fields are set and others, unchanged", func() {
 			testDocument := &currentDocument
 			expectedDocument := bson.E{"c", 4}
-			setNestedDocumentValue([]string{"c"}, 4, testDocument, false)
+			err := setNestedDocumentValue([]string{"c"}, 4, testDocument, false)
+			So(err, ShouldBeNil)
 			newDocument := *testDocument
 			So(len(newDocument), ShouldEqual, 3)
 			So(newDocument[2], ShouldResemble, expectedDocument)
@@ -247,31 +238,47 @@ func TestSetNestedDocumentValue(t *testing.T) {
 		Convey("ensure new nested top-level fields are set and others, unchanged", func() {
 			testDocument := &currentDocument
 			expectedDocument := bson.D{{"b", "4"}}
-			setNestedDocumentValue([]string{"c", "b"}, "4", testDocument, false)
+			err := setNestedDocumentValue([]string{"c", "b"}, "4", testDocument, false)
+			So(err, ShouldBeNil)
 			newDocument := *testDocument
 			So(len(newDocument), ShouldEqual, 3)
 			So(newDocument[2].Key, ShouldResemble, "c")
-			So(*newDocument[2].Value.(*bson.D), ShouldResemble, expectedDocument)
+
+			valMap, ok := newDocument[2].Value.(*bson.D)
+			So(ok, ShouldBeTrue)
+
+			So(*valMap, ShouldResemble, expectedDocument)
 		})
 		Convey("ensure existing nested level fields are set and others, unchanged", func() {
 			testDocument := &currentDocument
 			expectedDocument := bson.D{{"c", "d"}, {"d", 9}}
-			setNestedDocumentValue([]string{"b", "d"}, 9, testDocument, false)
+			err := setNestedDocumentValue([]string{"b", "d"}, 9, testDocument, false)
+			So(err, ShouldBeNil)
 			newDocument := *testDocument
 			So(len(newDocument), ShouldEqual, 2)
 			So(newDocument[1].Key, ShouldResemble, "b")
-			So(*newDocument[1].Value.(*bson.D), ShouldResemble, expectedDocument)
+
+			valMap, ok := newDocument[1].Value.(*bson.D)
+			So(ok, ShouldBeTrue)
+
+			So(*valMap, ShouldResemble, expectedDocument)
 		})
 		Convey("ensure subsequent calls update fields accordingly", func() {
 			testDocument := &currentDocument
 			expectedDocumentOne := bson.D{{"c", "d"}, {"d", 9}}
 			expectedDocumentTwo := bson.E{"f", 23}
-			setNestedDocumentValue([]string{"b", "d"}, 9, testDocument, false)
+			err := setNestedDocumentValue([]string{"b", "d"}, 9, testDocument, false)
+			So(err, ShouldBeNil)
 			newDocument := *testDocument
 			So(len(newDocument), ShouldEqual, 2)
 			So(newDocument[1].Key, ShouldResemble, "b")
-			So(*newDocument[1].Value.(*bson.D), ShouldResemble, expectedDocumentOne)
-			setNestedDocumentValue([]string{"f"}, 23, testDocument, false)
+
+			valDoc, ok := newDocument[1].Value.(*bson.D)
+			So(ok, ShouldBeTrue)
+
+			So(*valDoc, ShouldResemble, expectedDocumentOne)
+			err = setNestedDocumentValue([]string{"f"}, 23, testDocument, false)
+			So(err, ShouldBeNil)
 			newDocument = *testDocument
 			So(len(newDocument), ShouldEqual, 3)
 			So(newDocument[2], ShouldResemble, expectedDocumentTwo)
@@ -388,7 +395,11 @@ func TestTokensToBSON(t *testing.T) {
 			So(expectedDocument[1].Key, ShouldResemble, bsonD[1].Key)
 			So(expectedDocument[1].Value, ShouldResemble, bsonD[1].Value)
 			So(expectedDocument[2].Key, ShouldResemble, bsonD[2].Key)
-			So(expectedDocument[2].Value, ShouldResemble, *bsonD[2].Value.(*bson.D))
+
+			valueD, ok := bsonD[2].Value.(*bson.D)
+			So(ok, ShouldBeTrue)
+
+			So(expectedDocument[2].Value, ShouldResemble, *valueD)
 		})
 	})
 }
@@ -479,45 +490,53 @@ func TestProcessDocuments(t *testing.T) {
 func TestDoSequentialStreaming(t *testing.T) {
 	testtype.SkipUnlessTestType(t, testtype.UnitTestType)
 
-	Convey("Given some import workers, a Converters input channel and an bson.D output channel", t, func() {
-		inputChannel := make(chan Converter, 5)
-		outputChannel := make(chan bson.D, 5)
-		workerInputChannel := []chan Converter{
-			make(chan Converter),
-			make(chan Converter),
-		}
-		workerOutputChannel := []chan bson.D{
-			make(chan bson.D),
-			make(chan bson.D),
-		}
-		importWorkers := []*importWorker{
-			{
-				unprocessedDataChan:   workerInputChannel[0],
-				processedDocumentChan: workerOutputChannel[0],
-				tomb:                  &tomb.Tomb{},
-			},
-			{
-				unprocessedDataChan:   workerInputChannel[1],
-				processedDocumentChan: workerOutputChannel[1],
-				tomb:                  &tomb.Tomb{},
-			},
-		}
-		Convey("documents moving through the input channel should be processed and returned in sequence", func() {
-			// start goroutines to do sequential processing
-			for _, iw := range importWorkers {
-				go iw.processDocuments(true)
+	Convey(
+		"Given some import workers, a Converters input channel and an bson.D output channel",
+		t,
+		func() {
+			inputChannel := make(chan Converter, 5)
+			outputChannel := make(chan bson.D, 5)
+			workerInputChannel := []chan Converter{
+				make(chan Converter),
+				make(chan Converter),
 			}
-			// feed in a bunch of documents
-			for _, inputCSVDocument := range csvConverters {
-				inputChannel <- inputCSVDocument
+			workerOutputChannel := []chan bson.D{
+				make(chan bson.D),
+				make(chan bson.D),
 			}
-			close(inputChannel)
-			doSequentialStreaming(importWorkers, inputChannel, outputChannel)
-			for _, document := range expectedDocuments {
-				So(<-outputChannel, ShouldResemble, document)
+			importWorkers := []*importWorker{
+				{
+					unprocessedDataChan:   workerInputChannel[0],
+					processedDocumentChan: workerOutputChannel[0],
+					tomb:                  &tomb.Tomb{},
+				},
+				{
+					unprocessedDataChan:   workerInputChannel[1],
+					processedDocumentChan: workerOutputChannel[1],
+					tomb:                  &tomb.Tomb{},
+				},
 			}
-		})
-	})
+			Convey(
+				"documents moving through the input channel should be processed and returned in sequence",
+				func() {
+					// start goroutines to do sequential processing
+					for _, iw := range importWorkers {
+						//nolint:errcheck
+						go iw.processDocuments(true)
+					}
+					// feed in a bunch of documents
+					for _, inputCSVDocument := range csvConverters {
+						inputChannel <- inputCSVDocument
+					}
+					close(inputChannel)
+					doSequentialStreaming(importWorkers, inputChannel, outputChannel)
+					for _, document := range expectedDocuments {
+						So(<-outputChannel, ShouldResemble, document)
+					}
+				},
+			)
+		},
+	)
 }
 
 func TestStreamDocuments(t *testing.T) {
@@ -530,19 +549,22 @@ func TestStreamDocuments(t *testing.T) {
 		inputChannel := make(chan Converter, 5)
 		outputChannel := make(chan bson.D, 5)
 
-		Convey("the entire pipeline should complete without error under normal circumstances", func() {
-			// stream in some documents
-			for _, csvConverter := range csvConverters {
-				inputChannel <- csvConverter
-			}
-			close(inputChannel)
-			So(streamDocuments(true, 3, inputChannel, outputChannel), ShouldBeNil)
+		Convey(
+			"the entire pipeline should complete without error under normal circumstances",
+			func() {
+				// stream in some documents
+				for _, csvConverter := range csvConverters {
+					inputChannel <- csvConverter
+				}
+				close(inputChannel)
+				So(streamDocuments(true, 3, inputChannel, outputChannel), ShouldBeNil)
 
-			// ensure documents are streamed out and processed in the correct manner
-			for _, expectedDocument := range expectedDocuments {
-				So(<-outputChannel, ShouldResemble, expectedDocument)
-			}
-		})
+				// ensure documents are streamed out and processed in the correct manner
+				for _, expectedDocument := range expectedDocuments {
+					So(<-outputChannel, ShouldResemble, expectedDocument)
+				}
+			},
+		)
 		Convey("the entire pipeline should complete with error if an error is encountered", func() {
 			// stream in some documents - create duplicate headers to simulate an error
 			csvConverter := CSVConverter{
@@ -569,20 +591,20 @@ func TestChannelQuorumError(t *testing.T) {
 			ch := make(chan error, 2)
 			ch <- nil
 			ch <- io.EOF
-			So(channelQuorumError(ch, 2), ShouldNotBeNil)
+			So(channelQuorumError(ch), ShouldNotBeNil)
 		})
 		Convey("no error should be returned if none is received", func() {
 			ch := make(chan error, 2)
 			ch <- nil
 			ch <- nil
-			So(channelQuorumError(ch, 2), ShouldBeNil)
+			So(channelQuorumError(ch), ShouldBeNil)
 		})
 		Convey("no error should be returned if up to quorum nil errors are received", func() {
 			ch := make(chan error, 3)
 			ch <- nil
 			ch <- nil
 			ch <- io.EOF
-			So(channelQuorumError(ch, 2), ShouldBeNil)
+			So(channelQuorumError(ch), ShouldBeNil)
 		})
 	})
 }

@@ -8,6 +8,7 @@
 package mongostat
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"strings"
@@ -170,7 +171,7 @@ func (cluster *AsyncClusterMonitor) updateHostInfo(stat *line.StatLine) {
 }
 
 // printSnapshot formats and dumps the current state of all the stats collected.
-// returns whether the program should now exit
+// returns whether the program should now exit.
 func (cluster *AsyncClusterMonitor) printSnapshot() bool {
 	cluster.mapLock.RLock()
 	defer cluster.mapLock.RUnlock()
@@ -221,7 +222,8 @@ func (cluster *AsyncClusterMonitor) Monitor(sleep time.Duration) error {
 		}
 	}()
 
-	for range time.Tick(sleep) {
+	ticker := time.NewTicker(sleep)
+	for range ticker.C {
 		if cluster.printSnapshot() {
 			break
 		}
@@ -234,8 +236,8 @@ func (cluster *AsyncClusterMonitor) Monitor(sleep time.Duration) error {
 func NewNodeMonitor(opts options.ToolOptions, fullHost string) (*NodeMonitor, error) {
 	optsCopy := opts
 	host, port := parseHostPort(fullHost)
-	optsCopy.Connection.Host = host
-	optsCopy.Connection.Port = port
+	optsCopy.Host = host
+	optsCopy.Port = port
 	uriCopy := *opts.URI
 	newCS, err := rewriteURI(uriCopy.ConnectionString, fullHost)
 	if err != nil {
@@ -273,7 +275,10 @@ func (node *NodeMonitor) Disconnect() {
 
 // Report collects the stat info for a single node and sends found hostnames on
 // the "discover" channel if checkShards is true.
-func (node *NodeMonitor) Poll(discover chan string, checkShards bool) (*status.ServerStatus, error) {
+func (node *NodeMonitor) Poll(
+	discover chan string,
+	checkShards bool,
+) (*status.ServerStatus, error) {
 	stat := &status.ServerStatus{}
 	log.Logvf(log.DebugHigh, "getting session on server: %v", node.host)
 	session, err := node.sessionProvider.GetSession()
@@ -283,7 +288,8 @@ func (node *NodeMonitor) Poll(discover chan string, checkShards bool) (*status.S
 	}
 	log.Logvf(log.DebugHigh, "got session on server: %v", node.host)
 
-	result := session.Database("admin").RunCommand(nil, bson.D{{"serverStatus", 1}, {"recordStats", 0}})
+	result := session.Database("admin").
+		RunCommand(context.TODO(), bson.D{{"serverStatus", 1}, {"recordStats", 0}})
 	err = result.Err()
 	if err != nil {
 		log.Logvf(log.DebugLow, "got error calling serverStatus against server %v", node.host)
@@ -322,12 +328,14 @@ func (node *NodeMonitor) Poll(discover chan string, checkShards bool) (*status.S
 	stat.Host = node.host
 	if discover != nil && stat != nil && status.IsMongos(stat) && checkShards {
 		log.Logvf(log.DebugLow, "checking config database to discover shards")
-		shardCursor, err := session.Database("config").Collection("shards").Find(nil, bson.M{}, nil)
+		shardCursor, err := session.Database("config").
+			Collection("shards").
+			Find(context.TODO(), bson.M{}, nil)
 		if err != nil {
 			return nil, fmt.Errorf("error discovering shards: %v", err)
 		}
 		shard := ConfigShard{}
-		for shardCursor.Next(nil) {
+		for shardCursor.Next(context.TODO()) {
 			if cursorErr := shardCursor.Decode(&shard); cursorErr != nil {
 				return nil, fmt.Errorf("error decoding shard info: %v", err)
 			}
@@ -336,7 +344,9 @@ func (node *NodeMonitor) Poll(discover chan string, checkShards bool) (*status.S
 				discover <- shardHost
 			}
 		}
-		shardCursor.Close(nil)
+		if closeErr := shardCursor.Close(context.TODO()); closeErr != nil {
+			return nil, fmt.Errorf("error closing shard discovery cursor: %v", err)
+		}
 	}
 
 	return stat, nil
@@ -347,7 +357,8 @@ func (node *NodeMonitor) Poll(discover chan string, checkShards bool) (*status.S
 // with the 'discover' channel.
 func (node *NodeMonitor) Watch(sleep time.Duration, discover chan string, cluster ClusterMonitor) {
 	var cycle uint64
-	for ticker := time.Tick(sleep); ; <-ticker {
+	ticker := time.NewTicker(sleep)
+	for range ticker.C {
 		log.Logvf(log.DebugHigh, "polling server: %v", node.host)
 		stat, err := node.Poll(discover, cycle%10 == 0)
 
@@ -400,7 +411,7 @@ func (mstat *MongoStat) AddNewNode(fullhost string) error {
 }
 
 // Run is the top-level function that starts the monitoring
-// and discovery goroutines
+// and discovery goroutines.
 func (mstat *MongoStat) Run() error {
 	if mstat.Discovered != nil {
 		go func() {

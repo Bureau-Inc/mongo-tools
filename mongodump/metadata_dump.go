@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/mongodb/mongo-tools/common/bsonutil"
 	"github.com/mongodb/mongo-tools/common/db"
 	"github.com/mongodb/mongo-tools/common/intents"
 	"github.com/mongodb/mongo-tools/common/log"
@@ -34,11 +35,14 @@ type IndexDocumentFromDB struct {
 
 // dumpMetadata gets the metadata for a collection and writes it
 // in readable JSON format.
-func (dump *MongoDump) dumpMetadata(intent *intents.Intent, buffer resettableOutputBuffer) (err error) {
+func (dump *MongoDump) dumpMetadata(
+	intent *intents.Intent,
+	buffer resettableOutputBuffer,
+) (err error) {
 
 	meta := Metadata{
 		// We have to initialize Indexes to an empty slice, not nil, so that an empty
-		// array is marshalled into json instead of null. That is, {indexes:[]} is okay
+		// array is marshaled into json instead of null. That is, {indexes:[]} is okay
 		// but {indexes:null} will cause assertions in our legacy C++ mongotools
 		Indexes: []bson.D{},
 	}
@@ -71,7 +75,11 @@ func (dump *MongoDump) dumpMetadata(intent *intents.Intent, buffer resettableOut
 	}
 
 	if dump.OutputOptions.ViewsAsCollections || intent.IsView() {
-		log.Logvf(log.DebugLow, "not dumping indexes metadata for '%v' because it is a view", intent.Namespace())
+		log.Logvf(
+			log.DebugLow,
+			"not dumping indexes metadata for '%v' because it is a view",
+			intent.Namespace(),
+		)
 	} else {
 		// get the indexes
 		indexesIter, err := db.GetIndexes(session.Database(intent.DB).Collection(intent.C))
@@ -101,9 +109,13 @@ func (dump *MongoDump) dumpMetadata(intent *intents.Intent, buffer resettableOut
 	}
 
 	// Finally, we send the results to the writer as JSON bytes
-	jsonBytes, err := bson.MarshalExtJSON(meta, true, false)
+	jsonBytes, err := bsonutil.MarshalExtJSONWithBSONRoundtripConsistency(meta, true, false)
 	if err != nil {
-		return fmt.Errorf("error marshalling metadata json for collection `%v`: %v", intent.Namespace(), err)
+		return fmt.Errorf(
+			"error marshaling metadata json for collection `%v`: %v",
+			intent.Namespace(),
+			err,
+		)
 	}
 
 	err = intent.MetadataFile.Open()
@@ -113,7 +125,11 @@ func (dump *MongoDump) dumpMetadata(intent *intents.Intent, buffer resettableOut
 	defer func() {
 		closeErr := intent.MetadataFile.Close()
 		if err == nil && closeErr != nil {
-			err = fmt.Errorf("error writing metadata for collection `%v` to disk: %v", intent.Namespace(), closeErr)
+			err = fmt.Errorf(
+				"error writing metadata for collection `%v` to disk: %v",
+				intent.Namespace(),
+				closeErr,
+			)
 		}
 	}()
 
@@ -125,13 +141,21 @@ func (dump *MongoDump) dumpMetadata(intent *intents.Intent, buffer resettableOut
 		defer func() {
 			closeErr := buffer.Close()
 			if err == nil && closeErr != nil {
-				err = fmt.Errorf("error writing metadata for collection `%v` to disk: %v", intent.Namespace(), closeErr)
+				err = fmt.Errorf(
+					"error writing metadata for collection `%v` to disk: %v",
+					intent.Namespace(),
+					closeErr,
+				)
 			}
 		}()
 	}
 	_, err = f.Write(jsonBytes)
 	if err != nil {
-		err = fmt.Errorf("error writing metadata for collection `%v` to disk: %v", intent.Namespace(), err)
+		err = fmt.Errorf(
+			"error writing metadata for collection `%v` to disk: %v",
+			intent.Namespace(),
+			err,
+		)
 	}
 	return
 }

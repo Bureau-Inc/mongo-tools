@@ -8,9 +8,19 @@
 package mongodump
 
 import (
+	"bufio"
+	"compress/gzip"
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
+	"github.com/mongodb/mongo-tools/common"
 	"github.com/mongodb/mongo-tools/common/archive"
 	"github.com/mongodb/mongo-tools/common/auth"
 	"github.com/mongodb/mongo-tools/common/bsonutil"
@@ -26,26 +36,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
-
-	"bufio"
-	"compress/gzip"
-	"fmt"
-	"io"
-	"os"
-	"path/filepath"
-	"sync"
-	"time"
 )
-
-type storageEngineType int
-
-const (
-	storageEngineUnknown = 0
-	storageEngineMMAPV1  = 1
-	storageEngineModern  = 2
-)
-
-const defaultPermissions = 0755
 
 // MongoDump is a container for the user-specified options and
 // internal state used for running mongodump.
@@ -69,7 +60,7 @@ type MongoDump struct {
 	oplogEnd        primitive.Timestamp
 	isMongos        bool
 	isAtlasProxy    bool
-	storageEngine   storageEngineType
+	serverVersion   string
 	authVersion     int
 	archive         *archive.Writer
 	// shutdownIntentsNotifier is provided to the multiplexer
@@ -97,43 +88,49 @@ func newNotifier() *notifier { return &notifier{notified: make(chan struct{})} }
 // ValidateOptions checks for any incompatible sets of options.
 func (dump *MongoDump) ValidateOptions() error {
 	switch {
-	case dump.OutputOptions.Out == "-" && dump.ToolOptions.Namespace.Collection == "":
+	case dump.OutputOptions.Out == "-" && dump.ToolOptions.Collection == "":
 		return fmt.Errorf("can only dump a single collection to stdout")
-	case dump.ToolOptions.Namespace.DB == "" && dump.ToolOptions.Namespace.Collection != "":
+	case dump.ToolOptions.DB == "" && dump.ToolOptions.Collection != "":
 		return fmt.Errorf("cannot dump a collection without a specified database")
-	case dump.InputOptions.Query != "" && dump.ToolOptions.Namespace.Collection == "":
+	case dump.InputOptions.Query != "" && dump.ToolOptions.Collection == "":
 		return fmt.Errorf("cannot dump using a query without a specified collection")
-	case dump.InputOptions.QueryFile != "" && dump.ToolOptions.Namespace.Collection == "":
+	case dump.InputOptions.QueryFile != "" && dump.ToolOptions.Collection == "":
 		return fmt.Errorf("cannot dump using a queryFile without a specified collection")
 	case dump.InputOptions.Query != "" && dump.InputOptions.QueryFile != "":
 		return fmt.Errorf("either query or queryFile can be specified as a query option, not both")
 	case dump.InputOptions.Query != "" && dump.InputOptions.TableScan:
 		return fmt.Errorf("cannot use --forceTableScan when specifying --query")
-	case dump.OutputOptions.DumpDBUsersAndRoles && dump.ToolOptions.Namespace.DB == "":
+	case dump.OutputOptions.DumpDBUsersAndRoles && dump.ToolOptions.DB == "":
 		return fmt.Errorf("must specify a database when running with dumpDbUsersAndRoles")
-	case dump.OutputOptions.DumpDBUsersAndRoles && dump.ToolOptions.Namespace.Collection != "":
+	case dump.OutputOptions.DumpDBUsersAndRoles && dump.ToolOptions.Collection != "":
 		return fmt.Errorf("cannot specify a collection when running with dumpDbUsersAndRoles")
-	case strings.HasPrefix(dump.ToolOptions.Namespace.Collection, "system.buckets."):
+	case strings.HasPrefix(dump.ToolOptions.Collection, "system.buckets."):
 		return fmt.Errorf("cannot specify a system.buckets collection in --collection. " +
 			"Specifying the timeseries collection will dump the system.buckets collection")
-	case dump.OutputOptions.Oplog && dump.ToolOptions.Namespace.DB != "":
+	case dump.OutputOptions.Oplog && dump.ToolOptions.DB != "":
 		return fmt.Errorf("--oplog mode only supported on full dumps")
-	case len(dump.OutputOptions.ExcludedCollections) > 0 && dump.ToolOptions.Namespace.Collection != "":
+	case len(dump.OutputOptions.ExcludedCollections) > 0 && dump.ToolOptions.Collection != "":
 		return fmt.Errorf("--collection is not allowed when --excludeCollection is specified")
-	case len(dump.OutputOptions.ExcludedCollectionPrefixes) > 0 && dump.ToolOptions.Namespace.Collection != "":
-		return fmt.Errorf("--collection is not allowed when --excludeCollectionsWithPrefix is specified")
-	case len(dump.OutputOptions.ExcludedCollections) > 0 && dump.ToolOptions.Namespace.DB == "":
+	case len(dump.OutputOptions.ExcludedCollectionPrefixes) > 0 && dump.ToolOptions.Collection != "":
+		return fmt.Errorf(
+			"--collection is not allowed when --excludeCollectionsWithPrefix is specified",
+		)
+	case len(dump.OutputOptions.ExcludedCollections) > 0 && dump.ToolOptions.DB == "":
 		return fmt.Errorf("--db is required when --excludeCollection is specified")
-	case len(dump.OutputOptions.ExcludedCollectionPrefixes) > 0 && dump.ToolOptions.Namespace.DB == "":
+	case len(dump.OutputOptions.ExcludedCollectionPrefixes) > 0 && dump.ToolOptions.DB == "":
 		return fmt.Errorf("--db is required when --excludeCollectionsWithPrefix is specified")
 	case dump.OutputOptions.Out != "" && dump.OutputOptions.Archive != "":
 		return fmt.Errorf("--out not allowed when --archive is specified")
 	case dump.OutputOptions.Out == "-" && dump.OutputOptions.Gzip:
-		return fmt.Errorf("compression can't be used when dumping a single collection to standard output")
+		return fmt.Errorf(
+			"compression can't be used when dumping a single collection to standard output",
+		)
 	case dump.OutputOptions.NumParallelCollections <= 0:
 		return fmt.Errorf("numParallelCollections must be positive")
 	case dump.isAtlasProxy && (dump.OutputOptions.DumpDBUsersAndRoles || dump.ToolOptions.DB == "admin"):
-		return fmt.Errorf("can't dump from admin database when connecting to a MongoDB Atlas free or shared cluster")
+		return fmt.Errorf(
+			"can't dump from admin database when connecting to a MongoDB Atlas free or shared cluster",
+		)
 	}
 	return nil
 }
@@ -142,11 +139,10 @@ func (dump *MongoDump) ValidateOptions() error {
 func (dump *MongoDump) Init() error {
 	log.Logvf(log.DebugHigh, "initializing mongodump object")
 
-	// this would be default, but explicit setting protects us from any
-	// redefinition of the constants.
-	dump.storageEngine = storageEngineUnknown
-
-	pref, err := db.NewReadPreference(dump.InputOptions.ReadPreference, dump.ToolOptions.URI.ParsedConnString())
+	pref, err := db.NewReadPreference(
+		dump.InputOptions.ReadPreference,
+		dump.ToolOptions.ParsedConnString(),
+	)
 	if err != nil {
 		return fmt.Errorf("error parsing --readPreference : %v", err)
 	}
@@ -192,11 +188,12 @@ func (dump *MongoDump) Init() error {
 func (dump *MongoDump) verifyCollectionExists() (bool, error) {
 	// Running MongoDump against a DB with no collection specified works. In this case, return true so the process
 	// can continue.
-	if dump.ToolOptions.Namespace.Collection == "" {
+	if dump.ToolOptions.Collection == "" {
 		return true, nil
 	}
 
-	coll := dump.SessionProvider.DB(dump.ToolOptions.Namespace.DB).Collection(dump.ToolOptions.Namespace.Collection)
+	coll := dump.SessionProvider.DB(dump.ToolOptions.Namespace.DB).
+		Collection(dump.ToolOptions.Collection)
 	collInfo, err := db.GetCollectionInfo(coll)
 	if err != nil {
 		return false, err
@@ -209,13 +206,35 @@ func (dump *MongoDump) verifyCollectionExists() (bool, error) {
 func (dump *MongoDump) Dump() (err error) {
 	defer dump.SessionProvider.Close()
 
+	if !dump.OutputOptions.Oplog && (dump.InputOptions.SourceWritesDoneBarrier != "") {
+		// Wait for tests to stop writes before dumping any collections.
+		//
+		// In resmoke testing, the barrier is used to ensure that mongodump captures the correct
+		// state of the source cluster.  Events that occur before the barrier file is created will
+		// definitely be captured in the dumped collections.  Events that occur after the barrier
+		// file is created may not be captured.
+		barrier := dump.InputOptions.SourceWritesDoneBarrier
+		if err = waitForSourceWritesDoneBarrier(barrier); err != nil {
+			return err
+		}
+	}
+
+	// A test with the combination of
+	//    1. --oplog and
+	//    2. --internalSourceWritesOnly and
+	//    3. a specified collection
+	//    4. the collection didn't exist at the time mongodump was started but is
+	//       created later and possibly captured in the oplog
+	// would do this check too early and thus fail.
+	//
+	// That's out of scope for mongodump passthrough testing so we don't try to handle it.
 	exists, err := dump.verifyCollectionExists()
 	if err != nil {
 		return fmt.Errorf("error verifying collection info: %v", err)
 	}
 	if !exists {
 		log.Logvf(log.Always, "namespace with DB %s and collection %s does not exist",
-			dump.ToolOptions.Namespace.DB, dump.ToolOptions.Namespace.Collection)
+			dump.ToolOptions.DB, dump.ToolOptions.Collection)
 		return nil
 	}
 
@@ -339,7 +358,8 @@ func (dump *MongoDump) Dump() (err error) {
 
 	// If we enter this case, then we're not connected to an atlas proxy otherwise
 	// mongodump would have errored earlier.
-	if !dump.SkipUsersAndRoles && dump.OutputOptions.DumpDBUsersAndRoles && dump.ToolOptions.DB != "admin" {
+	if !dump.SkipUsersAndRoles && dump.OutputOptions.DumpDBUsersAndRoles &&
+		dump.ToolOptions.DB != "admin" {
 		err = dump.CreateUsersRolesVersionIntentsForDB(dump.ToolOptions.DB)
 		if err != nil {
 			return err
@@ -357,13 +377,19 @@ func (dump *MongoDump) Dump() (err error) {
 		return fmt.Errorf("error dumping metadata: %v", err)
 	}
 
+	dump.serverVersion, err = dump.SessionProvider.ServerVersion()
+	if err != nil {
+		log.Logvf(log.Always, "warning, couldn't get version information from server: %v", err)
+		dump.serverVersion = common.ServerVersionUnknown
+	}
+
 	if dump.OutputOptions.Archive != "" {
-		serverVersion, err := dump.SessionProvider.ServerVersion()
-		if err != nil {
-			log.Logvf(log.Always, "warning, couldn't get version information from server: %v", err)
-			serverVersion = "unknown"
-		}
-		dump.archive.Prelude, err = archive.NewPrelude(dump.manager, dump.OutputOptions.NumParallelCollections, serverVersion, dump.ToolOptions.VersionStr)
+		dump.archive.Prelude, err = archive.NewPrelude(
+			dump.manager,
+			dump.OutputOptions.NumParallelCollections,
+			dump.serverVersion,
+			dump.ToolOptions.VersionStr,
+		)
 		if err != nil {
 			return fmt.Errorf("creating archive prelude: %v", err)
 		}
@@ -412,21 +438,34 @@ func (dump *MongoDump) Dump() (err error) {
 	// TODO, either remove this debug or improve the language
 	log.Logvf(log.DebugLow, "dump phase III: the oplog")
 
-	// If we are capturing the oplog, we dump all oplog entries that occurred
-	// while dumping the database. Before and after dumping the oplog,
-	// we check to see if the oplog has rolled over (i.e. the most recent entry when
-	// we started still exist, so we know we haven't lost data)
 	if dump.OutputOptions.Oplog {
+		if dump.InputOptions.SourceWritesDoneBarrier != "" {
+			// Wait for tests to stop writes before choosing the oplogEnd time.
+			//
+			// In resmoke testing, the barrier is used to ensure that mongodump captures the correct
+			// state of the source cluster.  Events that occur before the barrier file is created will
+			// definitely be captured either in the dumped collections, or the dumped oplog.
+			// Events that occur after the barrier file is created may not be captured.
+			barrier := dump.InputOptions.SourceWritesDoneBarrier
+			if err = waitForSourceWritesDoneBarrier(barrier); err != nil {
+				return err
+			}
+		}
 		dump.oplogEnd, err = dump.getCurrentOplogTime()
 		if err != nil {
 			return fmt.Errorf("error getting oplog end: %v", err)
 		}
 
+		// If we are capturing the oplog, we dump all oplog entries that occurred
+		// while dumping the database. Before and after dumping the oplog,
+		// we check to see if the oplog has rolled over (i.e. the most recent entry when
+		// we started still exist, so we know we haven't lost data)
 		log.Logvf(log.DebugLow, "checking if oplog entry %v still exists", dump.oplogStart)
 		exists, err := dump.checkOplogTimestampExists(dump.oplogStart)
 		if !exists {
 			return fmt.Errorf(
-				"oplog overflow: mongodump was unable to capture all new oplog entries during execution")
+				"oplog overflow: mongodump was unable to capture all new oplog entries during execution",
+			)
 		}
 		if err != nil {
 			return fmt.Errorf("unable to check oplog for overflow: %v", err)
@@ -440,19 +479,28 @@ func (dump *MongoDump) Dump() (err error) {
 			return fmt.Errorf("error dumping oplog: %v", err)
 		}
 
-		// check the oplog for a rollover one last time, to avoid a race condition
+		// Check the oplog for a rollover one last time, to avoid a race condition
 		// wherein the oplog rolls over in the time after our first check, but before
 		// we copy it.
 		log.Logvf(log.DebugLow, "checking again if oplog entry %v still exists", dump.oplogStart)
 		exists, err = dump.checkOplogTimestampExists(dump.oplogStart)
 		if !exists {
 			return fmt.Errorf(
-				"oplog overflow: mongodump was unable to capture all new oplog entries during execution")
+				"oplog overflow: mongodump was unable to capture all new oplog entries during execution",
+			)
 		}
 		if err != nil {
 			return fmt.Errorf("unable to check oplog for overflow: %v", err)
 		}
 		log.Logvf(log.DebugHigh, "oplog entry %v still exists", dump.oplogStart)
+	}
+
+	if dump.OutputOptions.Archive == "" && dump.OutputOptions.Out != "-" {
+		log.Logvf(log.DebugLow, "dump phase IV: top level metadata json")
+		err = dump.DumpPreludeMetadata()
+		if err != nil {
+			return fmt.Errorf("failed to dump top level metadata: %v", err)
+		}
 	}
 
 	log.Logvf(log.DebugLow, "finishing dump")
@@ -486,8 +534,6 @@ func (dump *MongoDump) getResettableOutputBuffer() resettableOutputBuffer {
 // DumpIntents iterates through the previously-created intents and
 // dumps all of the found collections.
 func (dump *MongoDump) DumpIntents() error {
-	resultChan := make(chan error)
-
 	jobs := dump.OutputOptions.NumParallelCollections
 	if numIntents := len(dump.manager.Intents()); jobs > numIntents {
 		jobs = numIntents
@@ -499,6 +545,7 @@ func (dump *MongoDump) DumpIntents() error {
 		dump.manager.Finalize(intents.Legacy)
 	}
 
+	resultChan := make(chan error, jobs)
 	log.Logvf(log.Info, "dumping up to %v collections in parallel", jobs)
 
 	// start a goroutine for each job thread
@@ -509,7 +556,11 @@ func (dump *MongoDump) DumpIntents() error {
 			for {
 				intent := dump.manager.Pop()
 				if intent == nil {
-					log.Logvf(log.DebugHigh, "ending dump routine with id=%v, no more work to do", id)
+					log.Logvf(
+						log.DebugHigh,
+						"ending dump routine with id=%v, no more work to do",
+						id,
+					)
 					resultChan <- nil
 					return
 				}
@@ -549,51 +600,24 @@ func (dump *MongoDump) DumpIntent(intent *intents.Intent, buffer resettableOutpu
 		coll = intendedDB.Collection(intent.C)
 	}
 
-	// it is safer to assume that a collection is a view, if we cannot determine that it is not.
-	isView := true
-	// failure to get CollectionInfo should not cause the function to exit. We only use this to
-	// determine if a collection is a view.
-	collInfo, err := db.GetCollectionInfo(coll)
-	if err != nil {
-		return err
-	} else if collInfo != nil {
-		isView = collInfo.IsView()
-	}
-	// The storage engine cannot change from namespace to namespace,
-	// so we set it the first time we reach here, using a namespace we
-	// know must exist. If the storage engine is not mmapv1, we assume it
-	// is some modern storage engine that does not need to use an index
-	// scan for correctness.
-	// We cannot determine the storage engine, if this collection is a view,
-	// so we skip attempting to deduce the storage engine.
-	if dump.storageEngine == storageEngineUnknown && !isView {
-		if err != nil {
-			return err
-		}
-		// storageEngineModern denotes any storage engine that is not MMAPV1. For such storage
-		// engines we assume that collection scans are consistent.
-		dump.storageEngine = storageEngineModern
-		isMMAPV1, err := db.IsMMAPV1(intendedDB, intent.C)
-		if err != nil {
-			log.Logvf(log.Always,
-				"failed to determine storage engine, an mmapv1 storage engine could result in"+
-					" inconsistent dump results, error was: %v", err)
-		} else if isMMAPV1 {
-			dump.storageEngine = storageEngineMMAPV1
-		}
-	}
-
 	findQuery := &db.DeferredQuery{Coll: coll}
-	switch {
-	case len(dump.query) > 0:
+	if len(dump.query) > 0 {
 		if intent.IsTimeseries() {
 			timeseriesOptions, err := bsonutil.FindSubdocumentByKey("timeseries", &intent.Options)
 			if err != nil {
-				return errors.Wrapf(err, "could not find timeseries options for %s", intent.Namespace())
+				return errors.Wrapf(
+					err,
+					"could not find timeseries options for %s",
+					intent.Namespace(),
+				)
 			}
 			metaKey, err := bsonutil.FindStringValueByKey("metaField", &timeseriesOptions)
 			if err != nil {
-				return errors.Wrapf(err, "could not determine the metaField for %s", intent.Namespace())
+				return errors.Wrapf(
+					err,
+					"could not determine the metaField for %s",
+					intent.Namespace(),
+				)
 			}
 			for i, predicate := range dump.query {
 				splitPredicateKey := strings.SplitN(predicate.Key, ".", 2)
@@ -610,14 +634,6 @@ func (dump *MongoDump) DumpIntent(intent *intents.Intent, buffer resettableOutpu
 			}
 		}
 		findQuery.Filter = dump.query
-	// we only want to hint _id when the storage engine is MMAPV1 and this isn't a view, a
-	// special collection, the oplog, and the user is not asking to force table scans.
-	case dump.storageEngine == storageEngineMMAPV1 && !dump.InputOptions.TableScan &&
-		!isView && !intent.IsSpecialCollection() && !intent.IsOplog():
-		autoIndexId, err := bsonutil.FindValueByKey("autoIndexId", &intent.Options)
-		if err != nil || autoIndexId == true {
-			findQuery.Hint = bson.D{{"_id", 1}}
-		}
 	}
 
 	var dumpCount int64
@@ -637,7 +653,13 @@ func (dump *MongoDump) DumpIntent(intent *intents.Intent, buffer resettableOutpu
 		return err
 	}
 
-	log.Logvf(log.Always, "done dumping %v (%v %v)", intent.DataNamespace(), dumpCount, docPlural(dumpCount))
+	log.Logvf(
+		log.Always,
+		"done dumping %v (%v %v)",
+		intent.DataNamespace(),
+		dumpCount,
+		docPlural(dumpCount),
+	)
 	return nil
 }
 
@@ -649,7 +671,10 @@ type documentValidator func([]byte) error
 // and writes the raw bson results to the writer. Returns a final count of documents
 // dumped, and any errors that occurred.
 func (dump *MongoDump) dumpQueryToIntent(
-	query *db.DeferredQuery, intent *intents.Intent, buffer resettableOutputBuffer) (dumpCount int64, err error) {
+	query *db.DeferredQuery,
+	intent *intents.Intent,
+	buffer resettableOutputBuffer,
+) (dumpCount int64, err error) {
 	return dump.dumpValidatedQueryToIntent(query, intent, buffer, nil)
 }
 
@@ -661,7 +686,12 @@ func (dump *MongoDump) getCount(query *db.DeferredQuery, intent *intents.Intent)
 		return 0, nil
 	}
 
-	log.Logvf(log.DebugHigh, "Getting estimated count for %v.%v", query.Coll.Database().Name(), query.Coll.Name())
+	log.Logvf(
+		log.DebugHigh,
+		"Getting estimated count for %v.%v",
+		query.Coll.Database().Name(),
+		query.Coll.Name(),
+	)
 	// We call getCount() when we are dumping a collection. If we are dumping views as collections, we need to run a
 	// count instead of an estimatedDocumentCount which uses collStats. We don't do this if the intent is timeseries because
 	// we would be dumping system.buckets.X which can use collStats.
@@ -670,7 +700,13 @@ func (dump *MongoDump) getCount(query *db.DeferredQuery, intent *intents.Intent)
 		return 0, fmt.Errorf("error getting count from db: %v", err)
 	}
 
-	log.Logvf(log.DebugLow, "counted %v %v in %v", total, docPlural(int64(total)), intent.Namespace())
+	log.Logvf(
+		log.DebugLow,
+		"counted %v %v in %v",
+		total,
+		docPlural(int64(total)),
+		intent.Namespace(),
+	)
 	return int64(total), nil
 }
 
@@ -679,7 +715,11 @@ func (dump *MongoDump) getCount(query *db.DeferredQuery, intent *intents.Intent)
 // and writes the raw bson results to the writer. Returns a final count of documents
 // dumped, and any errors that occurred.
 func (dump *MongoDump) dumpValidatedQueryToIntent(
-	query *db.DeferredQuery, intent *intents.Intent, buffer resettableOutputBuffer, validator documentValidator) (dumpCount int64, err error) {
+	query *db.DeferredQuery,
+	intent *intents.Intent,
+	buffer resettableOutputBuffer,
+	validator documentValidator,
+) (dumpCount int64, err error) {
 
 	// restore of views from archives require an empty collection as the trigger to create the view
 	// so, we open here before the early return if IsView so that we write an empty collection to the archive
@@ -690,7 +730,11 @@ func (dump *MongoDump) dumpValidatedQueryToIntent(
 	defer func() {
 		closeErr := intent.BSONFile.Close()
 		if err == nil && closeErr != nil {
-			err = fmt.Errorf("error writing data for collection `%v` to disk: %v", intent.Namespace(), closeErr)
+			err = fmt.Errorf(
+				"error writing data for collection `%v` to disk: %v",
+				intent.Namespace(),
+				closeErr,
+			)
 		}
 	}()
 	// don't dump any data for views being dumped as views
@@ -717,7 +761,11 @@ func (dump *MongoDump) dumpValidatedQueryToIntent(
 		defer func() {
 			closeErr := buffer.Close()
 			if err == nil && closeErr != nil {
-				err = fmt.Errorf("error writing data for collection `%v` to disk: %v", intent.Namespace(), closeErr)
+				err = fmt.Errorf(
+					"error writing data for collection `%v` to disk: %v",
+					intent.Namespace(),
+					closeErr,
+				)
 			}
 		}()
 	}
@@ -729,22 +777,23 @@ func (dump *MongoDump) dumpValidatedQueryToIntent(
 	err = dump.dumpValidatedIterToWriter(cursor, f, dumpProgressor, validator)
 	dumpCount, _ = dumpProgressor.Progress()
 	if err != nil {
-		err = fmt.Errorf("error writing data for collection `%v` to disk: %v", intent.Namespace(), err)
+		err = fmt.Errorf(
+			"error writing data for collection `%v` to disk: %v",
+			intent.Namespace(),
+			err,
+		)
 	}
 	return
-}
-
-// dumpIterToWriter takes an mgo iterator, a writer, and a pointer to
-// a counter, and dumps the iterator's contents to the writer.
-func (dump *MongoDump) dumpIterToWriter(
-	iter *mongo.Cursor, writer io.Writer, progressCount progress.Updateable) error {
-	return dump.dumpValidatedIterToWriter(iter, writer, progressCount, nil)
 }
 
 // dumpValidatedIterToWriter takes a cursor, a writer, an Updateable object, and a documentValidator and validates and
 // dumps the iterator's contents to the writer.
 func (dump *MongoDump) dumpValidatedIterToWriter(
-	iter *mongo.Cursor, writer io.Writer, progressCount progress.Updateable, validator documentValidator) error {
+	iter *mongo.Cursor,
+	writer io.Writer,
+	progressCount progress.Updateable,
+	validator documentValidator,
+) error {
 	defer iter.Close(context.Background())
 	var termErr error
 
@@ -844,7 +893,7 @@ func (dump *MongoDump) DumpUsersAndRolesForDB(name string) error {
 }
 
 // DumpUsersAndRoles dumps all of the users and roles and versions
-// TODO: This and DumpUsersAndRolesForDB should be merged, correctly
+// TODO: This and DumpUsersAndRolesForDB should be merged, correctly.
 func (dump *MongoDump) DumpUsersAndRoles() error {
 	var err error
 	buffer := dump.getResettableOutputBuffer()
@@ -871,7 +920,7 @@ func (dump *MongoDump) DumpUsersAndRoles() error {
 }
 
 // DumpMetadata dumps the metadata for each intent in the manager
-// that has metadata
+// that has metadata.
 func (dump *MongoDump) DumpMetadata() error {
 	allIntents := dump.manager.Intents()
 	buffer := dump.getResettableOutputBuffer()
@@ -886,12 +935,69 @@ func (dump *MongoDump) DumpMetadata() error {
 	return nil
 }
 
-// nopCloseWriter implements io.WriteCloser. It wraps up a io.Writer, and adds a no-op Close
+type PreludeData struct {
+	ServerVersion string `json:"ServerVersion"`
+	ToolVersion   string `json:"ToolVersion"`
+}
+
+// DumpPreludeMetadata dumps information about the server and the dump in json format
+// Currently only writes the server version and tool version, but we can use this to write other metadata about the dump in the future.
+func (dump *MongoDump) DumpPreludeMetadata() error {
+	preludeData := PreludeData{
+		ServerVersion: dump.serverVersion,
+		ToolVersion:   dump.ToolOptions.VersionStr,
+	}
+
+	filename := "prelude.json"
+
+	if dump.ToolOptions.DB != "" {
+		filename = filepath.Join(dump.ToolOptions.DB, filename)
+	}
+	if dump.OutputOptions.Out == "" {
+		filename = filepath.Join("dump", filename)
+	} else {
+		filename = filepath.Join(dump.OutputOptions.Out, filename)
+	}
+	if dump.OutputOptions.Gzip {
+		filename += ".gz"
+	}
+
+	log.Logvf(log.DebugLow, "dumping prelude metadata to file %#q", filename)
+
+	file, err := os.Create(filename)
+	if errors.Is(err, os.ErrNotExist) {
+		// if parent directory doesn't exist, there was no data to dump, don't write prelude.json
+		log.Logvf(log.DebugLow, "parent directory does not exist, not writing %#q", filename)
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("failed to open file %#q: %w", filename, err)
+	}
+	defer file.Close()
+
+	var writer io.WriteCloser = file
+	if dump.OutputOptions.Gzip {
+		writer = gzip.NewWriter(file)
+		defer writer.Close()
+	}
+	bytes, err := json.Marshal(preludeData)
+	if err != nil {
+		return fmt.Errorf("error marshaling prelude data: %w", err)
+	}
+
+	_, err = writer.Write(bytes)
+	if err != nil {
+		return fmt.Errorf("failed to write prelude metadata to file %#q: %w", filename, err)
+	}
+
+	return nil
+}
+
+// nopCloseWriter implements io.WriteCloser. It wraps up a io.Writer, and adds a no-op Close.
 type nopCloseWriter struct {
 	io.Writer
 }
 
-// Close does nothing on nopCloseWriters
+// Close does nothing on nopCloseWriters.
 func (*nopCloseWriter) Close() error {
 	return nil
 }

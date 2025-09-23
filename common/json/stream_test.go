@@ -5,13 +5,13 @@
 // a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
 //
 // Based on github.com/golang/go by The Go Authors
-// See THIRD-PARTY-NOTICES for original license terms.
+// See cyclonedx.sbom.json for original license terms.
 
 package json
 
 import (
 	"bytes"
-	"io/ioutil"
+	"io"
 	"net"
 	"reflect"
 	"strings"
@@ -111,7 +111,7 @@ func TestDecoderBuffered(t *testing.T) {
 	if m.Name != "Gopher" {
 		t.Errorf("Name = %q; want Gopher", m.Name)
 	}
-	rest, err := ioutil.ReadAll(d.Buffered())
+	rest, err := io.ReadAll(d.Buffered())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,6 +198,7 @@ func TestBlocking(t *testing.T) {
 
 	for _, enc := range blockingTests {
 		r, w := net.Pipe()
+		//nolint:errcheck
 		go w.Write([]byte(enc))
 		var val interface{}
 
@@ -220,7 +221,7 @@ func BenchmarkEncoderEncode(b *testing.B) {
 	}
 	v := &T{"foo", "bar"}
 	for i := 0; i < b.N; i++ {
-		if err := NewEncoder(ioutil.Discard).Encode(v); err != nil {
+		if err := NewEncoder(io.Discard).Encode(v); err != nil {
 			b.Fatal(err)
 		}
 	}

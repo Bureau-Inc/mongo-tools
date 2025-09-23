@@ -51,8 +51,12 @@ func TestMarshalDMarshalJSON(t *testing.T) {
 					So(asMap["aaa"], ShouldEqual, 543.2)
 					So(asMap["I"], ShouldEqual, 0)
 					So(asMap["E"], ShouldEqual, 0)
-					So(asMap["map"].(map[string]interface{})["1"], ShouldEqual, 1)
-					So(asMap["map"].(map[string]interface{})["2"], ShouldEqual, "two")
+
+					asMapMap, ok := asMap["map"].(map[string]any)
+					So(ok, ShouldBeTrue)
+
+					So(asMapMap["1"], ShouldEqual, 1)
+					So(asMapMap["2"], ShouldEqual, "two")
 				})
 			})
 
@@ -101,11 +105,14 @@ func TestFindValueByKey(t *testing.T) {
 			So(value, ShouldEqual, "a")
 			So(err, ShouldBeNil)
 		})
-		Convey("the corresponding value top-level keys with sub-document values should be returned", func() {
-			value, err := FindValueByKey("field3", document)
-			So(value, ShouldEqual, subDocument)
-			So(err, ShouldBeNil)
-		})
+		Convey(
+			"the corresponding value top-level keys with sub-document values should be returned",
+			func() {
+				value, err := FindValueByKey("field3", document)
+				So(value, ShouldEqual, subDocument)
+				So(err, ShouldBeNil)
+			},
+		)
 		Convey("for non-existent keys nil and an error should be returned", func() {
 			value, err := FindValueByKey("field4", document)
 			So(value, ShouldBeNil)
@@ -128,9 +135,12 @@ func TestEscapedKey(t *testing.T) {
 				var asMap bson.M
 				err := json.Unmarshal(asJSON, &asMap)
 				So(err, ShouldBeNil)
-				Convey("with the original value being correctly found with the unescaped key", func() {
-					So(asMap[`foo"bar`], ShouldEqual, "a")
-				})
+				Convey(
+					"with the original value being correctly found with the unescaped key",
+					func() {
+						So(asMap[`foo"bar`], ShouldEqual, "a")
+					},
+				)
 			})
 		})
 	})

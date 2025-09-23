@@ -11,20 +11,18 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"math"
 	"os"
 	"strings"
 	"time"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/bsontype"
-
+	"github.com/mongodb/mongo-tools/common/bsonutil"
 	"github.com/mongodb/mongo-tools/common/db"
 	"github.com/mongodb/mongo-tools/common/failpoint"
 	"github.com/mongodb/mongo-tools/common/json"
 	"github.com/mongodb/mongo-tools/common/log"
 	"github.com/mongodb/mongo-tools/common/options"
 	"github.com/mongodb/mongo-tools/common/util"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 // BSONDump is a container for the user-specified options and
@@ -97,7 +95,7 @@ func New(opts Options) (*BSONDump, error) {
 
 	// 16kb + 16mb - This is the maximum size we would get when dumping the
 	// oplog itself. See https://jira.mongodb.org/browse/TOOLS-3001.
-	maxBSONSize := (16 * 1024) + (16 * math.Pow(1024, 2))
+	maxBSONSize := (16 * 1024) + (16 * 1024 * 1024)
 	dumper.InputSource.SetMaxBSONSize(int32(maxBSONSize))
 
 	writer, err := opts.GetWriter()
@@ -118,7 +116,7 @@ func (bd *BSONDump) Close() error {
 }
 
 func formatJSON(doc *bson.Raw, pretty bool) ([]byte, error) {
-	extendedJSON, err := bson.MarshalExtJSON(doc, true, false)
+	extendedJSON, err := bsonutil.MarshalExtJSONReversible(doc, true, false)
 	if err != nil {
 		return nil, fmt.Errorf("error converting BSON to extended JSON: %v", err)
 	}
@@ -244,7 +242,7 @@ func printBSON(raw bson.Raw, indentLevel int, out io.Writer) error {
 		fmt.Fprintf(out, "%v\t\t\ttype: %4v size: %v\n", indent, int8(value.Type), len(rawElem))
 
 		//For nested objects or arrays, recurse.
-		if value.Type == bsontype.EmbeddedDocument || value.Type == bsontype.Array {
+		if value.Type == bson.TypeEmbeddedDocument || value.Type == bson.TypeArray {
 			err = printBSON(value.Value, indentLevel+3, out)
 			if err != nil {
 				return err

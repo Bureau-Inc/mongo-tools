@@ -47,19 +47,25 @@ func main() {
 	signals.Handle()
 
 	// verify uri options and log them
-	opts.URI.LogUnsupportedOptions()
+	opts.LogUnsupportedOptions()
 
 	if opts.RowCount < 0 {
 		log.Logvf(log.Always, "invalid value for --rowcount: %v", opts.RowCount)
 		os.Exit(util.ExitFailure)
 	}
 
-	if opts.Auth.Username != "" && opts.Auth.Source == "" && !opts.Auth.RequiresExternalDB() {
-		if opts.URI != nil && opts.URI.ConnectionString != "" {
-			log.Logvf(log.Always, "authSource is required when authenticating against a non $external database")
+	if opts.Username != "" && opts.Source == "" && !opts.RequiresExternalDB() {
+		if opts.URI != nil && opts.ConnectionString != "" {
+			log.Logvf(
+				log.Always,
+				"authSource is required when authenticating against a non $external database",
+			)
 			os.Exit(util.ExitFailure)
 		}
-		log.Logvf(log.Always, "--authenticationDatabase is required when authenticating against a non $external database")
+		log.Logvf(
+			log.Always,
+			"--authenticationDatabase is required when authenticating against a non $external database",
+		)
 		os.Exit(util.ExitFailure)
 	}
 

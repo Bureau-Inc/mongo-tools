@@ -64,7 +64,14 @@ type TSVConverter struct {
 
 // NewTSVInputReader returns a TSVInputReader configured to read input from the
 // given io.Reader, extracting the specified columns only.
-func NewTSVInputReader(colSpecs []ColumnSpec, in io.Reader, rejects io.Writer, numDecoders int, ignoreBlanks bool, useArrayIndexFields bool) *TSVInputReader {
+func NewTSVInputReader(
+	colSpecs []ColumnSpec,
+	in io.Reader,
+	rejects io.Writer,
+	numDecoders int,
+	ignoreBlanks bool,
+	useArrayIndexFields bool,
+) *TSVInputReader {
 	szCount := newSizeTrackingReader(newBomDiscardingReader(in))
 	return &TSVInputReader{
 		colSpecs:            colSpecs,
@@ -150,7 +157,7 @@ func (r *TSVInputReader) StreamDocument(ordered bool, readDocs chan bson.D) (ret
 		tsvErrChan <- streamDocuments(ordered, r.numDecoders, tsvRecordChan, readDocs)
 	}()
 
-	return channelQuorumError(tsvErrChan, 2)
+	return channelQuorumError(tsvErrChan)
 }
 
 // Convert implements the Converter interface for TSV input. It converts a
@@ -164,12 +171,12 @@ func (c TSVConverter) Convert() (b bson.D, err error) {
 		c.useArrayIndexFields,
 	)
 	if _, ok := err.(coercionError); ok {
-		c.Print()
-		err = nil
+		err = c.Print()
 	}
 	return
 }
 
-func (c TSVConverter) Print() {
-	c.rejectWriter.Write([]byte(c.data + "\n"))
+func (c TSVConverter) Print() error {
+	_, err := c.rejectWriter.Write([]byte(c.data + "\n"))
+	return err
 }

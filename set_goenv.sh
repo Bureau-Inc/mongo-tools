@@ -1,6 +1,8 @@
 #!/bin/bash
 
 set_goenv() {
+
+    echo "Setting go env in set_goenv.sh"
     # Error out if not in the same directory as this script
     if [ ! -f ./set_goenv.sh ]; then
         echo "Must be run from mongo-tools top-level directory. Aborting."
@@ -11,11 +13,11 @@ set_goenv() {
     UNAME_S=$(PATH="/usr/bin:/bin" uname -s)
     case $UNAME_S in
         CYGWIN*)
-            PREF_GOROOT="c:/golang/go1.20"
-            PREF_PATH="/cygdrive/c/golang/go1.20/bin:/cygdrive/c/mingw-w64/x86_64-4.9.1-posix-seh-rt_v3-rev1/mingw64/bin:$PATH"
+            PREF_GOROOT="c:/golang/go1.23"
+            PREF_PATH="/cygdrive/c/golang/go1.22/bin:/cygdrive/c/mingw-w64/x86_64-4.9.1-posix-seh-rt_v3-rev1/mingw64/bin:$PATH"
         ;;
         *)
-            PREF_GOROOT="/opt/golang/go1.20"
+            PREF_GOROOT="/opt/golang/go1.23"
             PREF_PATH="$PREF_GOROOT/bin:$PATH"
         ;;
     esac
@@ -69,6 +71,8 @@ set_goenv() {
         echo "Current path '$(pwd)' doesn't resemble a GOPATH-style path. Aborting.";
         return 1
     fi
+
+    export PATH="$PATH:$GOPATH/bin"
 
     return
 }

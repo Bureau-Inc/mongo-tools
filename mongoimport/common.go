@@ -25,13 +25,6 @@ import (
 
 type ParseGrace int
 
-// FieldInfo contains information about field names. It is used in validateFields.
-type FieldInfo struct {
-	position int
-	field    string
-	parts    []string
-}
-
 const (
 	pgAutoCast ParseGrace = iota
 	pgSkipField
@@ -70,7 +63,7 @@ type Converter interface {
 }
 
 // An importWorker reads Converter from the unprocessedDataChan channel and
-// sends processed BSON documents on the processedDocumentChan channel
+// sends processed BSON documents on the processedDocumentChan channel.
 type importWorker struct {
 	// unprocessedDataChan is used to stream the input data for a worker to process
 	unprocessedDataChan chan Converter
@@ -78,7 +71,7 @@ type importWorker struct {
 	// used to stream the processed document back to the caller
 	processedDocumentChan chan bson.D
 
-	// used to synchronise all worker goroutines
+	// used to synchronize all worker goroutines
 	tomb *tomb.Tomb
 }
 
@@ -117,7 +110,7 @@ var (
 	UTF8_BOM = []byte{0xEF, 0xBB, 0xBF}
 )
 
-// bomDiscardingReader implements and wraps io.Reader, discarding the UTF-8 BOM, if applicable
+// bomDiscardingReader implements and wraps io.Reader, discarding the UTF-8 BOM, if applicable.
 type bomDiscardingReader struct {
 	buf     *bufio.Reader
 	didRead bool
@@ -127,7 +120,10 @@ func (bd *bomDiscardingReader) Read(p []byte) (int, error) {
 	if !bd.didRead {
 		bom, err := bd.buf.Peek(3)
 		if err == nil && bytes.Equal(bom, UTF8_BOM) {
-			bd.buf.Read(make([]byte, 3)) // discard BOM
+			_, err = bd.buf.Read(make([]byte, 3)) // discard BOM
+			if err != nil {
+				return 0, err
+			}
 		}
 		bd.didRead = true
 	}
@@ -138,11 +134,11 @@ func newBomDiscardingReader(r io.Reader) *bomDiscardingReader {
 	return &bomDiscardingReader{buf: bufio.NewReader(r)}
 }
 
-// channelQuorumError takes a channel and a quorum - which specifies how many
-// messages to receive on that channel before returning. It either returns the
-// first non-nil error received on the channel or nil if up to `quorum` nil
-// errors are received
-func channelQuorumError(ch <-chan error, quorum int) (err error) {
+const quorum = 2
+
+// channelQuorumError takes a channel and either returns the first non-nil error received on the
+// channel or nil if up to 2 nil errors are received.
+func channelQuorumError(ch <-chan error) (err error) {
 	for i := 0; i < quorum; i++ {
 		if err = <-ch; err != nil {
 			return
@@ -151,7 +147,7 @@ func channelQuorumError(ch <-chan error, quorum int) (err error) {
 	return
 }
 
-// constructUpsertDocument constructs a BSON document to use for upserts
+// constructUpsertDocument constructs a BSON document to use for upserts.
 func constructUpsertDocument(upsertFields []string, document bson.D) bson.D {
 	upsertDocument := bson.D{}
 	var hasDocumentKey bool
@@ -171,8 +167,12 @@ func constructUpsertDocument(upsertFields []string, document bson.D) bson.D {
 // doSequentialStreaming takes a slice of workers, a readDocs (input) channel and
 // an outputChan (output) channel. It sequentially writes unprocessed data read from
 // the input channel to each worker and then sequentially reads the processed data
-// from each worker before passing it on to the output channel
-func doSequentialStreaming(workers []*importWorker, readDocs chan Converter, outputChan chan bson.D) {
+// from each worker before passing it on to the output channel.
+func doSequentialStreaming(
+	workers []*importWorker,
+	readDocs chan Converter,
+	outputChan chan bson.D,
+) {
 	numWorkers := len(workers)
 
 	// feed in the data to be processed and do round-robin
@@ -212,7 +212,7 @@ func doSequentialStreaming(workers []*importWorker, readDocs chan Converter, out
 // field's associated value in the document. The field is specified using dot
 // notation for nested fields. e.g. "person.age" would return 34 would return
 // 34 in the document: bson.M{"person": bson.M{"age": 34}} whereas,
-// "person.name" would return nil
+// "person.name" would return nil.
 func getUpsertValue(field string, document bson.D) interface{} {
 	index := strings.Index(field, ".")
 	if index == -1 {
@@ -227,12 +227,12 @@ func getUpsertValue(field string, document bson.D) interface{} {
 		log.Logvf(log.DebugHigh, "no subdoc found for '%v'", left)
 		return nil
 	}
-	switch subDoc.(type) {
+	switch subDoc := subDoc.(type) {
 	case bson.D:
-		subDocD := subDoc.(bson.D)
+		subDocD := subDoc
 		return getUpsertValue(field[index+1:], subDocD)
 	case *bson.D:
-		subDocD := subDoc.(*bson.D)
+		subDocD := subDoc
 		return getUpsertValue(field[index+1:], *subDocD)
 	default:
 		log.Logvf(log.DebugHigh, "subdoc found for '%v', but couldn't coerce to bson.D", left)
@@ -241,7 +241,7 @@ func getUpsertValue(field string, document bson.D) interface{} {
 }
 
 // removeBlankFields takes document and returns a new copy in which
-// fields with empty/blank values are removed
+// fields with empty/blank values are removed.
 func removeBlankFields(document bson.D) (newDocument bson.D) {
 	for _, keyVal := range document {
 		if val, ok := keyVal.Value.(*bson.D); ok {
@@ -289,7 +289,12 @@ func removeBlankFields(document bson.D) (newDocument bson.D) {
 //     exists at that index in the array, a reference to that document or array will be passed
 //     to setNestedDocumentValue or setNestedArrayValue respectively. If no value exists, a new document
 //     or array is created, added to the array, and a reference is passed to those functions.
-func setNestedDocumentValue(fieldParts []string, value interface{}, document *bson.D, useArrayIndexFields bool) (err error) {
+func setNestedDocumentValue(
+	fieldParts []string,
+	value interface{},
+	document *bson.D,
+	useArrayIndexFields bool,
+) (err error) {
 	if len(fieldParts) == 1 {
 		*document = append(*document, bson.E{Key: fieldParts[0], Value: value})
 		return nil
@@ -357,13 +362,20 @@ func setNestedArrayValue(fieldParts []string, value interface{}, array *bson.A) 
 	// The first part of the field should be an index of an array
 	idx, ok := isNatNum(fieldParts[0])
 	if !ok {
-		return fmt.Errorf("setNestedArrayValue expected an integer field, but instead received %s", fieldParts[0])
+		return fmt.Errorf(
+			"setNestedArrayValue expected an integer field, but instead received %s",
+			fieldParts[0],
+		)
 	}
 
 	if len(fieldParts) == 1 {
 		if idx != len(*array) {
-			return fmt.Errorf("Trying to add value to array at index %d, but array is %d elements long. "+
-				"Array indices in fields must start from 0 and increase sequentially", idx, len(*array))
+			return fmt.Errorf(
+				"Trying to add value to array at index %d, but array is %d elements long. "+
+					"Array indices in fields must start from 0 and increase sequentially",
+				idx,
+				len(*array),
+			)
 		}
 
 		*array = append(*array, value)
@@ -422,7 +434,7 @@ func setNestedArrayValue(fieldParts []string, value interface{}, array *bson.A) 
 
 // isNatNum returns a number and true if the string can be parsed as a natural number (including 0)
 // The first byte of the string must be a number from 1-9. So "001" would not be parsed.
-// Neither would phone numbers such as "+15558675309"
+// Neither would phone numbers such as "+15558675309".
 func isNatNum(s string) (int, bool) {
 	if len(s) > 1 && s[0] == byte('0') { // don't allow 0 prefixes
 		return 0, false
@@ -438,8 +450,13 @@ func isNatNum(s string) (int, bool) {
 // streamDocuments concurrently processes data gotten from the inputChan
 // channel in parallel and then sends over the processed data to the outputChan
 // channel - either in sequence or concurrently (depending on the value of
-// ordered) - in which the data was received
-func streamDocuments(ordered bool, numDecoders int, readDocs chan Converter, outputChan chan bson.D) (retErr error) {
+// ordered) - in which the data was received.
+func streamDocuments(
+	ordered bool,
+	numDecoders int,
+	readDocs chan Converter,
+	outputChan chan bson.D,
+) (retErr error) {
 	if numDecoders == 0 {
 		numDecoders = 1
 	}
@@ -483,14 +500,20 @@ func streamDocuments(ordered bool, numDecoders int, readDocs chan Converter, out
 }
 
 // coercionError should only be used as a specific error type to check
-// whether tokensToBSON wants the row to print
+// whether tokensToBSON wants the row to print.
 type coercionError struct{}
 
 func (coercionError) Error() string { return "coercionError" }
 
 // tokensToBSON reads in slice of records - along with ordered column names -
 // and returns a BSON document for the record.
-func tokensToBSON(colSpecs []ColumnSpec, tokens []string, numProcessed uint64, ignoreBlanks bool, useArrayIndexFields bool) (bson.D, error) {
+func tokensToBSON(
+	colSpecs []ColumnSpec,
+	tokens []string,
+	numProcessed uint64,
+	ignoreBlanks bool,
+	useArrayIndexFields bool,
+) (bson.D, error) {
 	log.Logvf(log.DebugHigh, "got line: %v", tokens)
 	var parsedValue interface{}
 	document := bson.D{}
@@ -513,15 +536,29 @@ func tokensToBSON(colSpecs []ColumnSpec, tokens []string, numProcessed uint64, i
 					log.Logvf(log.Always, "skipping row #%d: %v", numProcessed, tokens)
 					return nil, coercionError{}
 				case pgStop:
-					return nil, fmt.Errorf("type coercion failure in document #%d for column '%s', "+
-						"could not parse token '%s' to type %s",
-						numProcessed, colSpecs[index].Name, token, colSpecs[index].TypeName)
+					return nil, fmt.Errorf(
+						"type coercion failure in document #%d for column '%s', "+
+							"could not parse token '%s' to type %s",
+						numProcessed,
+						colSpecs[index].Name,
+						token,
+						colSpecs[index].TypeName,
+					)
 				}
 			}
 			if len(colSpecs[index].NameParts) > 1 {
-				err = setNestedDocumentValue(colSpecs[index].NameParts, parsedValue, &document, useArrayIndexFields)
+				err = setNestedDocumentValue(
+					colSpecs[index].NameParts,
+					parsedValue,
+					&document,
+					useArrayIndexFields,
+				)
 				if err != nil {
-					return nil, fmt.Errorf("can't set value for key %s: %s", colSpecs[index].Name, err)
+					return nil, fmt.Errorf(
+						"can't set value for key %s: %s",
+						colSpecs[index].Name,
+						err,
+					)
 				}
 			} else {
 				document = append(document, bson.E{Key: colSpecs[index].Name, Value: parsedValue})
@@ -595,9 +632,15 @@ func validateFields(inputFields []string, useArrayIndexFields bool) error {
 
 // addFieldToTree is a recursive function that builds up a tree of fields. It is used to check
 // that fields are compatible with each other. When useArrayIndexFields is set, it is mutually recursive
-// with addFieldToArray(). It closely mimics the behaviour of setNestedDocumentValue(). See validateFields()
+// with addFieldToArray(). It closely mimics the behavior of setNestedDocumentValue(). See validateFields()
 // for more information on the validity checks that are made when constructing a tree of fields.
-func addFieldToTree(fieldParts []string, fullField string, fieldPrefix string, tree map[string]interface{}, useArrayIndexFields bool) (map[string]interface{}, error) {
+func addFieldToTree(
+	fieldParts []string,
+	fullField string,
+	fieldPrefix string,
+	tree map[string]interface{},
+	useArrayIndexFields bool,
+) (map[string]interface{}, error) {
 	head, tail := fieldParts[0], fieldParts[1:]
 	if fieldPrefix == "" {
 		fieldPrefix = head
@@ -664,7 +707,12 @@ func addFieldToTree(fieldParts []string, fullField string, fieldPrefix string, t
 }
 
 // addFieldToArray is used with addFieldToTree() to build a valid tree of fields.
-func addFieldToArray(fieldParts []string, fullField string, fieldPrefix string, array []interface{}) ([]interface{}, error) {
+func addFieldToArray(
+	fieldParts []string,
+	fullField string,
+	fieldPrefix string,
+	array []interface{},
+) ([]interface{}, error) {
 	head, tail := fieldParts[0], fieldParts[1:]
 	fieldPrefix += "." + head
 
@@ -672,7 +720,12 @@ func addFieldToArray(fieldParts []string, fullField string, fieldPrefix string, 
 	headIndex, ok := isNatNum(head)
 	if !ok {
 		// We shouldn't ever get here
-		panic(fmt.Sprintf("addFieldToArray expected a natural number field, but instead received %s", fieldParts[0]))
+		panic(
+			fmt.Sprintf(
+				"addFieldToArray expected a natural number field, but instead received %s",
+				fieldParts[0],
+			),
+		)
 	}
 
 	if len(tail) == 0 {
@@ -776,10 +829,13 @@ func identicalError(field string) error {
 }
 
 func indexError(field string) error {
-	return fmt.Errorf("array index error with field '%v': array indexes in fields must start from 0 and increase sequentially", field)
+	return fmt.Errorf(
+		"array index error with field '%v': array indexes in fields must start from 0 and increase sequentially",
+		field,
+	)
 }
 
-// validateReaderFields is a helper to validate fields for input readers
+// validateReaderFields is a helper to validate fields for input readers.
 func validateReaderFields(fields []string, useArrayIndexFields bool) error {
 	if err := validateFields(fields, useArrayIndexFields); err != nil {
 		return err
@@ -795,7 +851,7 @@ func validateReaderFields(fields []string, useArrayIndexFields bool) error {
 // processDocuments reads from the Converter channel and for each record, converts it
 // to a bson.D document before sending it on the processedDocumentChan channel. Once the
 // input channel is closed the processed channel is also closed if the worker streams its
-// reads in order
+// reads in order.
 func (iw *importWorker) processDocuments(ordered bool) error {
 	if ordered {
 		defer close(iw.processedDocumentChan)

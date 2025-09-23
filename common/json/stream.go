@@ -5,7 +5,7 @@
 // a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
 //
 // Based on github.com/golang/go by The Go Authors
-// See THIRD-PARTY-NOTICES for original license terms.
+// See cyclonedx.sbom.json for original license terms.
 
 package json
 
@@ -186,7 +186,6 @@ func nonSpace(b []byte) bool {
 // An Encoder writes JSON objects to an output stream.
 type Encoder struct {
 	w   io.Writer
-	e   encodeState
 	err error
 }
 

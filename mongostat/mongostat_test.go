@@ -7,7 +7,7 @@
 package mongostat
 
 import (
-	"io/ioutil"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -21,7 +21,7 @@ import (
 
 func readBSONFile(file string, t *testing.T) (stat *status.ServerStatus) {
 	stat = &status.ServerStatus{}
-	ssBSON, err := ioutil.ReadFile(file)
+	ssBSON, err := os.ReadFile(file)
 	if err == nil {
 		err = bson.Unmarshal(ssBSON, stat)
 	}
@@ -49,7 +49,12 @@ func TestStatLine(t *testing.T) {
 	serverStatusOld.ShardCursorType = nil
 
 	Convey("StatsLine should accurately calculate opcounter diffs", t, func() {
-		statsLine := line.NewStatLine(serverStatusOld, serverStatusNew, defaultHeaders, defaultConfig)
+		statsLine := line.NewStatLine(
+			serverStatusOld,
+			serverStatusNew,
+			defaultHeaders,
+			defaultConfig,
+		)
 		So(statsLine.Fields["insert"], ShouldEqual, "10")
 		So(statsLine.Fields["query"], ShouldEqual, "5")
 		So(statsLine.Fields["update"], ShouldEqual, "7")
@@ -57,7 +62,6 @@ func TestStatLine(t *testing.T) {
 		So(statsLine.Fields["getmore"], ShouldEqual, "3")
 		command := strings.Split(statsLine.Fields["command"], "|")[0]
 		So(command, ShouldEqual, "669")
-		So(statsLine.Fields["faults"], ShouldEqual, "5")
 
 		locked := strings.Split(statsLine.Fields["locked_db"], ":")
 		So(locked[0], ShouldEqual, "test")
@@ -75,8 +79,13 @@ func TestStatLine(t *testing.T) {
 
 	serverStatusNew.SampleTime, _ = time.Parse("2006 Jan 02 15:04:05", "2015 Nov 30 4:25:33")
 	Convey("StatsLine with non-default interval should calculate average diffs", t, func() {
-		statsLine := line.NewStatLine(serverStatusOld, serverStatusNew, defaultHeaders, defaultConfig)
-		// Opcounters and faults are averaged over sample period
+		statsLine := line.NewStatLine(
+			serverStatusOld,
+			serverStatusNew,
+			defaultHeaders,
+			defaultConfig,
+		)
+		// Opcounters are averaged over sample period
 		So(statsLine.Fields["insert"], ShouldEqual, "3")
 		So(statsLine.Fields["query"], ShouldEqual, "1")
 		So(statsLine.Fields["update"], ShouldEqual, "2")
@@ -85,7 +94,6 @@ func TestStatLine(t *testing.T) {
 		So(statsLine.Fields["getmore"], ShouldEqual, "1")
 		command := strings.Split(statsLine.Fields["command"], "|")[0]
 		So(command, ShouldEqual, "223")
-		So(statsLine.Fields["faults"], ShouldEqual, "1")
 
 		locked := strings.Split(statsLine.Fields["locked_db"], ":")
 		So(locked[0], ShouldEqual, "test")

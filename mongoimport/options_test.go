@@ -9,66 +9,63 @@ package mongoimport
 import (
 	"testing"
 
-	"go.mongodb.org/mongo-driver/x/mongo/driver/connstring"
-
-	"go.mongodb.org/mongo-driver/mongo/writeconcern"
-
 	"github.com/mongodb/mongo-tools/common/options"
 	"github.com/mongodb/mongo-tools/common/testtype"
 	. "github.com/smartystreets/goconvey/convey"
+	"go.mongodb.org/mongo-driver/mongo/writeconcern"
+	"go.mongodb.org/mongo-driver/x/mongo/driver/connstring"
 )
 
 // validateParseOptions is a helper function to call ParseOptions and verify the results.
 // args: command line args
 // expectSuccess: whether or not the error from ParseOptions should be nil
 // ingestWc: the correct value for opts.IngestOptions.WriteConcern
-// toolsWc: the correct value for opts.ToolsOptions.WriteConcern
-func validateParseOptions(args []string, expectSuccess bool, ingestWc string, toolsWc *writeconcern.WriteConcern) func() {
+// toolsWc: the correct value for opts.ToolsOptions.WriteConcern.
+func validateParseOptions(
+	args []string,
+	ingestWc string,
+	toolsWc *writeconcern.WriteConcern,
+) func() {
 	return func() {
 		opts, err := ParseOptions(args, "", "")
-		if expectSuccess {
-			So(err, ShouldBeNil)
-		} else {
-			So(err, ShouldNotBeNil)
-			return
-		}
+		So(err, ShouldBeNil)
 
 		So(opts.IngestOptions.WriteConcern, ShouldEqual, ingestWc)
 		So(opts.ToolOptions.WriteConcern, ShouldResemble, toolsWc)
 	}
 }
 
-// Regression test for TOOLS-1741
+// Regression test for TOOLS-1741.
 func TestWriteConcernWithURIParsing(t *testing.T) {
 	testtype.SkipUnlessTestType(t, testtype.UnitTestType)
 	Convey("With an IngestOptions and ToolsOptions", t, func() {
 		Convey("Parsing with no value should set a majority write concern",
-			validateParseOptions([]string{}, true, "", writeconcern.New(writeconcern.WMajority())))
+			validateParseOptions([]string{}, "", writeconcern.New(writeconcern.WMajority())))
 
 		Convey("Parsing with no writeconcern in URI should set a majority write concern",
 			validateParseOptions([]string{
 				"--uri", "mongodb://localhost:27017/test",
-			}, true, "", writeconcern.New(writeconcern.WMajority())))
+			}, "", writeconcern.New(writeconcern.WMajority())))
 
 		Convey("Parsing with writeconcern only in URI should set it correctly",
 			validateParseOptions([]string{
 				"--uri", "mongodb://localhost:27017/test?w=2",
-			}, true, "", writeconcern.New(writeconcern.W(2))))
+			}, "", writeconcern.New(writeconcern.W(2))))
 
 		Convey("Parsing with writeconcern only in command line should set it correctly",
 			validateParseOptions([]string{
 				"--writeConcern", "{w: 2}",
-			}, true, "{w: 2}", writeconcern.New(writeconcern.W(2))))
+			}, "{w: 2}", writeconcern.New(writeconcern.W(2))))
 
 		Convey("Parsing with writeconcern in URI and command line should set to command line",
 			validateParseOptions([]string{
 				"--uri", "mongodb://localhost:27017/test?w=2",
 				"--writeConcern", "{w: 3}",
-			}, true, "{w: 3}", writeconcern.New(writeconcern.W(3))))
+			}, "{w: 3}", writeconcern.New(writeconcern.W(3))))
 	})
 }
 
-// Test parsing for the --legacy flag
+// Test parsing for the --legacy flag.
 func TestLegacyOptionParsing(t *testing.T) {
 	testtype.SkipUnlessTestType(t, testtype.UnitTestType)
 
@@ -194,13 +191,17 @@ func TestPositionalArgumentParsing(t *testing.T) {
 				},
 			},
 			{
-				InputArgs: []string{"mongodb://user:pass@localhost/aws?authMechanism=MONGODB-AWS&authMechanismProperties=AWS_SESSION_TOKEN:token"},
+				InputArgs: []string{
+					"mongodb://user:pass@localhost/aws?authMechanism=MONGODB-AWS&authMechanismProperties=AWS_SESSION_TOKEN:token",
+				},
 				ExpectedOpts: Options{
 					ToolOptions: &options.ToolOptions{
 						URI: &options.URI{
 							ConnectionString: "mongodb://user:pass@localhost/aws?authMechanism=MONGODB-AWS&authMechanismProperties=AWS_SESSION_TOKEN:token",
-							ConnString: connstring.ConnString{
-								AuthMechanismProperties: map[string]string{"AWS_SESSION_TOKEN": "token"},
+							ConnString: &connstring.ConnString{
+								AuthMechanismProperties: map[string]string{
+									"AWS_SESSION_TOKEN": "token",
+								},
 							},
 						},
 						Auth: &options.Auth{
@@ -215,12 +216,14 @@ func TestPositionalArgumentParsing(t *testing.T) {
 				AuthType: "aws",
 			},
 			{
-				InputArgs: []string{"mongodb://user@localhost/kerberos?authSource=$external&authMechanism=GSSAPI&authMechanismProperties=SERVICE_NAME:service,CANONICALIZE_HOST_NAME:host,SERVICE_REALM:realm"},
+				InputArgs: []string{
+					"mongodb://user@localhost/kerberos?authSource=$external&authMechanism=GSSAPI&authMechanismProperties=SERVICE_NAME:service,CANONICALIZE_HOST_NAME:host,SERVICE_REALM:realm",
+				},
 				ExpectedOpts: Options{
 					ToolOptions: &options.ToolOptions{
 						URI: &options.URI{
 							ConnectionString: "mongodb://user@localhost/kerberos?authSource=$external&authMechanism=GSSAPI&authMechanismProperties=SERVICE_NAME:service,CANONICALIZE_HOST_NAME:host,SERVICE_REALM:realm",
-							ConnString: connstring.ConnString{
+							ConnString: &connstring.ConnString{
 								AuthMechanismProperties: map[string]string{
 									"SERVICE_NAME":           "service",
 									"CANONICALIZE_HOST_NAME": "host",
@@ -282,20 +285,37 @@ func TestPositionalArgumentParsing(t *testing.T) {
 				So(opts.File, ShouldEqual, tc.ExpectedOpts.File)
 				So(opts.ConnectionString, ShouldEqual, tc.ExpectedOpts.ConnectionString)
 			}
-			if tc.AuthType == "aws" {
-				So(opts.Auth.Username, ShouldEqual, tc.ExpectedOpts.Auth.Username)
-				So(opts.Auth.Password, ShouldEqual, tc.ExpectedOpts.Auth.Password)
-				So(opts.Auth.Mechanism, ShouldEqual, tc.ExpectedOpts.Auth.Mechanism)
-				So(opts.Auth.AWSSessionToken, ShouldEqual, tc.ExpectedOpts.Auth.AWSSessionToken)
-				So(opts.URI.ConnString.AuthMechanismProperties["AWS_SESSION_TOKEN"], ShouldEqual, tc.ExpectedOpts.URI.ConnString.AuthMechanismProperties["AWS_SESSION_TOKEN"])
-			} else if tc.AuthType == "kerberos" {
-				So(opts.Auth.Username, ShouldEqual, tc.ExpectedOpts.Auth.Username)
-				So(opts.Auth.Mechanism, ShouldEqual, tc.ExpectedOpts.Auth.Mechanism)
-				So(opts.Auth.Source, ShouldEqual, tc.ExpectedOpts.Auth.Source)
-				So(opts.URI.ConnString.AuthMechanismProperties["SERVICE_NAME"], ShouldEqual, tc.ExpectedOpts.URI.ConnString.AuthMechanismProperties["SERVICE_NAME"])
-				So(opts.URI.ConnString.AuthMechanismProperties["CANONICALIZE_HOST_NAME"], ShouldEqual, tc.ExpectedOpts.URI.ConnString.AuthMechanismProperties["CANONICALIZE_HOST_NAME"])
-				So(opts.URI.ConnString.AuthMechanismProperties["SERVICE_REALM"], ShouldEqual, tc.ExpectedOpts.URI.ConnString.AuthMechanismProperties["SERVICE_REALM"])
-				So(opts.Kerberos.Service, ShouldEqual, tc.ExpectedOpts.Kerberos.Service)
+			switch tc.AuthType {
+			case "aws":
+				So(opts.Username, ShouldEqual, tc.ExpectedOpts.Username)
+				So(opts.Password, ShouldEqual, tc.ExpectedOpts.Password)
+				So(opts.Mechanism, ShouldEqual, tc.ExpectedOpts.Mechanism)
+				So(opts.AWSSessionToken, ShouldEqual, tc.ExpectedOpts.AWSSessionToken)
+				So(
+					opts.ConnString.AuthMechanismProperties["AWS_SESSION_TOKEN"],
+					ShouldEqual,
+					tc.ExpectedOpts.ConnString.AuthMechanismProperties["AWS_SESSION_TOKEN"],
+				)
+			case "kerberos":
+				So(opts.Username, ShouldEqual, tc.ExpectedOpts.Username)
+				So(opts.Mechanism, ShouldEqual, tc.ExpectedOpts.Mechanism)
+				So(opts.Source, ShouldEqual, tc.ExpectedOpts.Source)
+				So(
+					opts.ConnString.AuthMechanismProperties["SERVICE_NAME"],
+					ShouldEqual,
+					tc.ExpectedOpts.ConnString.AuthMechanismProperties["SERVICE_NAME"],
+				)
+				So(
+					opts.ConnString.AuthMechanismProperties["CANONICALIZE_HOST_NAME"],
+					ShouldEqual,
+					tc.ExpectedOpts.ConnString.AuthMechanismProperties["CANONICALIZE_HOST_NAME"],
+				)
+				So(
+					opts.ConnString.AuthMechanismProperties["SERVICE_REALM"],
+					ShouldEqual,
+					tc.ExpectedOpts.ConnString.AuthMechanismProperties["SERVICE_REALM"],
+				)
+				So(opts.Service, ShouldEqual, tc.ExpectedOpts.Service)
 			}
 		}
 	})

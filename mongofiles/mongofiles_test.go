@@ -10,7 +10,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -45,10 +45,15 @@ var (
 		Verbosity:  &options.Verbosity{},
 		URI:        &options.URI{},
 	}
-	testFiles = map[string]primitive.ObjectID{"testfile1": primitive.NewObjectID(), "testfile2": primitive.NewObjectID(), "testfile3": primitive.NewObjectID(), "testfile4": primitive.NewObjectID()}
+	testFiles = map[string]primitive.ObjectID{
+		"testfile1": primitive.NewObjectID(),
+		"testfile2": primitive.NewObjectID(),
+		"testfile3": primitive.NewObjectID(),
+		"testfile4": primitive.NewObjectID(),
+	}
 )
 
-// put in some test data into GridFS
+// put in some test data into GridFS.
 func setUpGridFSTestData() (map[string]int, error) {
 	sessionProvider, err := db.NewSessionProvider(*toolOptions)
 	if err != nil {
@@ -69,7 +74,7 @@ func setUpGridFSTestData() (map[string]int, error) {
 
 	i := 0
 	for item, id := range testFiles {
-		stream, err := bucket.OpenUploadStreamWithID(id, string(item))
+		stream, err := bucket.OpenUploadStreamWithID(id, item)
 		if err != nil {
 			return nil, err
 		}
@@ -79,7 +84,7 @@ func setUpGridFSTestData() (map[string]int, error) {
 			return nil, err
 		}
 
-		bytesExpected[item] = int(n)
+		bytesExpected[item] = n
 
 		if err = stream.Close(); err != nil {
 			return nil, err
@@ -91,7 +96,7 @@ func setUpGridFSTestData() (map[string]int, error) {
 	return bytesExpected, nil
 }
 
-// remove test data from GridFS
+// remove test data from GridFS.
 func tearDownGridFSTestData() error {
 	sessionProvider, err := db.NewSessionProvider(*toolOptions)
 	if err != nil {
@@ -117,7 +122,11 @@ func simpleMongoFilesInstanceWithFilename(command, fname string) (*MongoFiles, e
 func simpleMongoFilesInstanceCommandOnly(command string) (*MongoFiles, error) {
 	return simpleMongoFilesInstanceWithFilenameAndID(command, "", "")
 }
-func simpleMongoFilesInstanceWithMultipleFileNames(command string, fnames ...string) (*MongoFiles, error) {
+
+func simpleMongoFilesInstanceWithMultipleFileNames(
+	command string,
+	fnames ...string,
+) (*MongoFiles, error) {
 	mongofiles, err := simpleMongoFilesInstanceCommandOnly(command)
 	if err != nil {
 		return nil, err
@@ -147,7 +156,7 @@ func simpleMongoFilesInstanceWithFilenameAndID(command, fname, ID string) (*Mong
 }
 
 // simpleMockMongoFilesInstanceWithFilename gets an instance of MongoFiles with no underlying SessionProvider.
-// Use this for tests that don't communicate with the server (e.g. options parsing tests)
+// Use this for tests that don't communicate with the server (e.g. options parsing tests).
 func simpleMockMongoFilesInstanceWithFilename(command, fname string) *MongoFiles {
 	return &MongoFiles{
 		ToolOptions:    toolOptions,
@@ -191,26 +200,26 @@ func fileContentsCompare(file1, file2 *os.File, t *testing.T) (bool, error) {
 		return false, nil
 	}
 
-	file1ContentsBytes, err := ioutil.ReadAll(file1)
+	file1ContentsBytes, err := io.ReadAll(file1)
 	if err != nil {
 		return false, err
 	}
-	file2ContentsBytes, err := ioutil.ReadAll(file2)
+	file2ContentsBytes, err := io.ReadAll(file2)
 	if err != nil {
 		return false, err
 	}
 
-	isContentSame := bytes.Compare(file1ContentsBytes, file2ContentsBytes) == 0
+	isContentSame := bytes.Equal(file1ContentsBytes, file2ContentsBytes)
 	return isContentSame, nil
 
 }
 
-// get an id of an existing file, for _id access
+// get an id of an existing file, for _id access.
 func idOfFile(filename string) string {
 	return fmt.Sprintf(`{"$oid":"%s"}`, testFiles[filename].Hex())
 }
 
-// test output needs some cleaning
+// test output needs some cleaning.
 func cleanAndTokenizeTestOutput(str string) []string {
 	// remove last \r\n in str to avoid unnecessary line on split
 	if str != "" {
@@ -220,7 +229,7 @@ func cleanAndTokenizeTestOutput(str string) []string {
 	return strings.Split(strings.Trim(str, "\r\n"), "\n")
 }
 
-// return slices of files and bytes in each file represented by each line
+// return slices of files and bytes in each file represented by each line.
 func getFilesAndBytesFromLines(lines []string) map[string]int {
 	var fileName string
 	var byteCount int
@@ -228,6 +237,7 @@ func getFilesAndBytesFromLines(lines []string) map[string]int {
 	results := make(map[string]int)
 
 	for _, line := range lines {
+		//nolint:errcheck
 		fmt.Sscanf(line, "%s\t%d", &fileName, &byteCount)
 		results[fileName] = byteCount
 	}
@@ -250,7 +260,7 @@ func getFilesAndBytesListFromGridFS() (map[string]int, error) {
 	return results, nil
 }
 
-// check if file exists
+// check if file exists.
 func fileExists(name string) bool {
 	if _, err := os.Stat(name); err != nil {
 		if os.IsNotExist(err) {
@@ -261,7 +271,7 @@ func fileExists(name string) bool {
 }
 
 // Test that it works whenever valid arguments are passed in and that
-// it barfs whenever invalid ones are passed
+// it barfs whenever invalid ones are passed.
 func TestValidArguments(t *testing.T) {
 	testtype.SkipUnlessTestType(t, testtype.UnitTestType)
 
@@ -274,20 +284,31 @@ func TestValidArguments(t *testing.T) {
 			So(err.Error(), ShouldEqual, "no command specified")
 		})
 
-		Convey("(list|delete|search|get_id|delete_id) should error out when more than 1 positional argument (except URI) is provided", func() {
-			for _, command := range []string{"list", "delete", "search", "get_id", "delete_id"} {
-				args := []string{command, "arg1", "arg2"}
-				err := mf.ValidateCommand(args)
-				So(err, ShouldNotBeNil)
-				So(err.Error(), ShouldEqual, "too many non-URI positional arguments (If you are trying to specify a connection string, it must begin with mongodb:// or mongodb+srv://)")
-			}
-		})
+		Convey(
+			"(list|delete|search|get_id|delete_id) should error out when more than 1 positional argument (except URI) is provided",
+			func() {
+				for _, command := range []string{"list", "delete", "search", "get_id", "delete_id"} {
+					args := []string{command, "arg1", "arg2"}
+					err := mf.ValidateCommand(args)
+					So(err, ShouldNotBeNil)
+					So(
+						err.Error(),
+						ShouldEqual,
+						"too many non-URI positional arguments (If you are trying to specify a connection string, it must begin with mongodb:// or mongodb+srv://)",
+					)
+				}
+			},
+		)
 
 		Convey("put_id should error out when more than 3 positional argument provided", func() {
 			args := []string{"put_id", "arg1", "arg2", "arg3"}
 			err := mf.ValidateCommand(args)
 			So(err, ShouldNotBeNil)
-			So(err.Error(), ShouldEqual, "too many non-URI positional arguments (If you are trying to specify a connection string, it must begin with mongodb:// or mongodb+srv://)")
+			So(
+				err.Error(),
+				ShouldEqual,
+				"too many non-URI positional arguments (If you are trying to specify a connection string, it must begin with mongodb:// or mongodb+srv://)",
+			)
 		})
 
 		Convey("put_id should error out when only 1 positional argument provided", func() {
@@ -303,39 +324,55 @@ func TestValidArguments(t *testing.T) {
 			So(mf.StorageOptions.LocalFileName, ShouldEqual, "")
 		})
 
-		Convey("It should not error out when the get command is given multiple supporting arguments", func() {
-			args := []string{"get", "foo", "bar", "baz"}
-			So(mf.ValidateCommand(args), ShouldBeNil)
-			So(mf.FileNameList, ShouldResemble, []string{"foo", "bar", "baz"})
-		})
+		Convey(
+			"It should not error out when the get command is given multiple supporting arguments",
+			func() {
+				args := []string{"get", "foo", "bar", "baz"}
+				So(mf.ValidateCommand(args), ShouldBeNil)
+				So(mf.FileNameList, ShouldResemble, []string{"foo", "bar", "baz"})
+			},
+		)
 
-		Convey("It should not error out when the put command is given multiple supporting arguments", func() {
-			args := []string{"put", "foo", "bar", "baz"}
-			So(mf.ValidateCommand(args), ShouldBeNil)
-			So(mf.FileNameList, ShouldResemble, []string{"foo", "bar", "baz"})
-		})
+		Convey(
+			"It should not error out when the put command is given multiple supporting arguments",
+			func() {
+				args := []string{"put", "foo", "bar", "baz"}
+				So(mf.ValidateCommand(args), ShouldBeNil)
+				So(mf.FileNameList, ShouldResemble, []string{"foo", "bar", "baz"})
+			},
+		)
 
-		Convey("It should error out when any of (get|put|delete|search|get_id|delete_id) not given supporting argument", func() {
-			for _, command := range []string{"get", "put", "delete", "search", "get_id", "delete_id"} {
-				args := []string{command}
-				err := mf.ValidateCommand(args)
-				So(err, ShouldNotBeNil)
-				So(err.Error(), ShouldEqual, fmt.Sprintf("'%v' argument missing", command))
-			}
-		})
+		Convey(
+			"It should error out when any of (get|put|delete|search|get_id|delete_id) not given supporting argument",
+			func() {
+				for _, command := range []string{"get", "put", "delete", "search", "get_id", "delete_id"} {
+					args := []string{command}
+					err := mf.ValidateCommand(args)
+					So(err, ShouldNotBeNil)
+					So(err.Error(), ShouldEqual, fmt.Sprintf("'%v' argument missing", command))
+				}
+			},
+		)
 
 		Convey("It should error out when a nonsensical command is given", func() {
 			args := []string{"commandnonexistent"}
 
 			err := mf.ValidateCommand(args)
 			So(err, ShouldNotBeNil)
-			So(err.Error(), ShouldEqual, fmt.Sprintf("'%v' is not a valid command (If you are trying to specify a connection string, it must begin with mongodb:// or mongodb+srv://)", args[0]))
+			So(
+				err.Error(),
+				ShouldEqual,
+				fmt.Sprintf(
+					"'%v' is not a valid command (If you are trying to specify a connection string, it must begin with mongodb:// or mongodb+srv://)",
+					args[0],
+				),
+			)
 		})
 
 	})
 }
 
-// Test that the output from mongofiles is actually correct
+// Test that the output from mongofiles is actually correct.
 func TestMongoFilesCommands(t *testing.T) {
 	testtype.SkipUnlessTestType(t, testtype.IntegrationTestType)
 
@@ -401,23 +438,26 @@ func TestMongoFilesCommands(t *testing.T) {
 			var buff bytes.Buffer
 			log.SetWriter(&buff)
 
-			Convey("store the file contents in a file with different name if '--local' flag used", func() {
-				buff.Truncate(0)
-				mf.StorageOptions.LocalFileName = "testfile1copy"
-				str, err := mf.Run(false)
-				So(err, ShouldBeNil)
-				So(str, ShouldEqual, "")
-				So(buff.Len(), ShouldNotEqual, 0)
+			Convey(
+				"store the file contents in a file with different name if '--local' flag used",
+				func() {
+					buff.Truncate(0)
+					mf.StorageOptions.LocalFileName = "testfile1copy"
+					str, err := mf.Run(false)
+					So(err, ShouldBeNil)
+					So(str, ShouldEqual, "")
+					So(buff.Len(), ShouldNotEqual, 0)
 
-				testFile, err := os.Open("testfile1copy")
-				So(err, ShouldBeNil)
-				defer testFile.Close()
+					testFile, err := os.Open("testfile1copy")
+					So(err, ShouldBeNil)
+					defer testFile.Close()
 
-				// pretty small file; so read all
-				testFile1Bytes, err := ioutil.ReadAll(testFile)
-				So(err, ShouldBeNil)
-				So(len(testFile1Bytes), ShouldEqual, bytesExpected["testfile1"])
-			})
+					// pretty small file; so read all
+					testFile1Bytes, err := io.ReadAll(testFile)
+					So(err, ShouldBeNil)
+					So(len(testFile1Bytes), ShouldEqual, bytesExpected["testfile1"])
+				},
+			)
 
 			// cleanup file we just copied to the local FS
 			Reset(func() {
@@ -464,7 +504,7 @@ func TestMongoFilesCommands(t *testing.T) {
 					So(err, ShouldBeNil)
 					defer testFile.Close()
 
-					bytesGotten, err := ioutil.ReadAll(testFile)
+					bytesGotten, err := io.ReadAll(testFile)
 					So(err, ShouldBeNil)
 					So(len(bytesGotten), ShouldEqual, bytesExpected[testFileName])
 				}
@@ -489,13 +529,11 @@ func TestMongoFilesCommands(t *testing.T) {
 		})
 
 		Convey("Testing the 'get_id' command with a file that is in GridFS should", func() {
-			mf, _ := simpleMongoFilesInstanceWithFilename("get", "testfile1")
-			id := idOfFile("testfile1")
-
+			_, err := simpleMongoFilesInstanceWithFilename("get", "testfile1")
 			So(err, ShouldBeNil)
-			idString := id
 
-			mf, err = simpleMongoFilesInstanceWithID("get_id", idString)
+			id := idOfFile("testfile1")
+			mf, err := simpleMongoFilesInstanceWithID("get_id", id)
 			So(err, ShouldBeNil)
 			So(mf, ShouldNotBeNil)
 
@@ -514,7 +552,7 @@ func TestMongoFilesCommands(t *testing.T) {
 				defer testFile.Close()
 
 				// pretty small file; so read all
-				testFile1Bytes, err := ioutil.ReadAll(testFile)
+				testFile1Bytes, err := io.ReadAll(testFile)
 				So(err, ShouldBeNil)
 				So(len(testFile1Bytes), ShouldEqual, bytesExpected["testfile1"])
 			})
@@ -536,53 +574,59 @@ func TestMongoFilesCommands(t *testing.T) {
 			mf, err := simpleMongoFilesInstanceCommandOnly(GetRegex)
 			So(err, ShouldBeNil)
 
-			Convey("return expected test files, but no others, when called without any server options", func() {
-				mf.FileNameRegex = "testfile[1-3]"
+			Convey(
+				"return expected test files, but no others, when called without any server options",
+				func() {
+					mf.FileNameRegex = "testfile[1-3]"
 
-				str, err := mf.Run(false)
-				So(err, ShouldBeNil)
-				So(str, ShouldBeEmpty)
+					str, err := mf.Run(false)
+					So(err, ShouldBeNil)
+					So(str, ShouldBeEmpty)
 
-				// Regex should get all testfiles but testfile4
-				expectedTestFiles := map[string]struct{}{
-					"testfile1": {},
-					"testfile2": {},
-					"testfile3": {},
-				}
-
-				for testFile := range testFiles {
-					_, err := os.Stat(testFile)
-					if _, ok := expectedTestFiles[testFile]; ok {
-						So(err, ShouldBeNil)
-					} else {
-						So(err, ShouldNotBeNil)
+					// Regex should get all testfiles but testfile4
+					expectedTestFiles := map[string]struct{}{
+						"testfile1": {},
+						"testfile2": {},
+						"testfile3": {},
 					}
-				}
-			})
 
-			Convey("return expected test files, but no others, when called with server options", func() {
-				// Check with case-insensitivity
-				mf.FileNameRegex = "tEsTfIlE[1-2]"
-				mf.StorageOptions.RegexOptions = "i"
-
-				str, err := mf.Run(false)
-				So(err, ShouldBeNil)
-				So(str, ShouldBeEmpty)
-
-				expectedTestFiles := map[string]struct{}{
-					"testfile1": {},
-					"testfile2": {},
-				}
-
-				for testFile := range testFiles {
-					_, err := os.Stat(testFile)
-					if _, ok := expectedTestFiles[testFile]; ok {
-						So(err, ShouldBeNil)
-					} else {
-						So(err, ShouldNotBeNil)
+					for testFile := range testFiles {
+						_, err := os.Stat(testFile)
+						if _, ok := expectedTestFiles[testFile]; ok {
+							So(err, ShouldBeNil)
+						} else {
+							So(err, ShouldNotBeNil)
+						}
 					}
-				}
-			})
+				},
+			)
+
+			Convey(
+				"return expected test files, but no others, when called with server options",
+				func() {
+					// Check with case-insensitivity
+					mf.FileNameRegex = "tEsTfIlE[1-2]"
+					mf.StorageOptions.RegexOptions = "i"
+
+					str, err := mf.Run(false)
+					So(err, ShouldBeNil)
+					So(str, ShouldBeEmpty)
+
+					expectedTestFiles := map[string]struct{}{
+						"testfile1": {},
+						"testfile2": {},
+					}
+
+					for testFile := range testFiles {
+						_, err := os.Stat(testFile)
+						if _, ok := expectedTestFiles[testFile]; ok {
+							So(err, ShouldBeNil)
+						} else {
+							So(err, ShouldNotBeNil)
+						}
+					}
+				},
+			)
 
 			Reset(func() {
 				// Remove any testfiles written to local filesystem
@@ -641,48 +685,61 @@ func TestMongoFilesCommands(t *testing.T) {
 				}
 			})
 
-			Convey("and each file should have exactly the same content as the original file", func() {
-				const localFileName = "lorem_ipsum_copy.txt"
-				buff.Truncate(0)
-				for _, testFile := range localTestFiles {
-					mfAfter, err := simpleMongoFilesInstanceWithFilename("get", testFile)
-					So(err, ShouldBeNil)
-					So(mf, ShouldNotBeNil)
-
-					mfAfter.StorageOptions.LocalFileName = localFileName
-					str, err = mfAfter.Run(false)
-					So(err, ShouldBeNil)
-					So(str, ShouldBeEmpty)
-
-					testName := fmt.Sprintf("compare contents of %v and original lorem ipsum file", testFile)
-					Convey(testName, func() {
-						loremIpsumOrig, err := os.Open(testFile)
+			Convey(
+				"and each file should have exactly the same content as the original file",
+				func() {
+					const localFileName = "lorem_ipsum_copy.txt"
+					buff.Truncate(0)
+					for _, testFile := range localTestFiles {
+						mfAfter, err := simpleMongoFilesInstanceWithFilename("get", testFile)
 						So(err, ShouldBeNil)
-						defer loremIpsumOrig.Close()
+						So(mf, ShouldNotBeNil)
 
-						loremIpsumCopy, err := os.Open(localFileName)
+						mfAfter.StorageOptions.LocalFileName = localFileName
+						str, err = mfAfter.Run(false)
 						So(err, ShouldBeNil)
-						defer loremIpsumCopy.Close()
+						So(str, ShouldBeEmpty)
 
-						isContentSame, err := fileContentsCompare(loremIpsumOrig, loremIpsumCopy, t)
+						testName := fmt.Sprintf(
+							"compare contents of %v and original lorem ipsum file",
+							testFile,
+						)
+						Convey(testName, func() {
+							loremIpsumOrig, err := os.Open(testFile)
+							So(err, ShouldBeNil)
+							defer loremIpsumOrig.Close()
+
+							loremIpsumCopy, err := os.Open(localFileName)
+							So(err, ShouldBeNil)
+							defer loremIpsumCopy.Close()
+
+							isContentSame, err := fileContentsCompare(
+								loremIpsumOrig,
+								loremIpsumCopy,
+								t,
+							)
+							So(err, ShouldBeNil)
+							So(isContentSame, ShouldBeTrue)
+						})
+					}
+
+					Reset(func() {
+						err = os.Remove(localFileName)
 						So(err, ShouldBeNil)
-						So(isContentSame, ShouldBeTrue)
 					})
+
+				},
+			)
+		})
+
+		Convey(
+			"Testing the 'put_id' command by putting some lorem ipsum file with 287613 bytes with different ids should succeed",
+			func() {
+				for _, idToTest := range []string{`test_id`, `{"a":"b"}`, `{"$numberLong":"999999999999999"}`, `{"a":{"b":{"c":{}}}}`} {
+					runPutIDTestCase(idToTest, t)
 				}
-
-				Reset(func() {
-					err = os.Remove(localFileName)
-					So(err, ShouldBeNil)
-				})
-
-			})
-		})
-
-		Convey("Testing the 'put_id' command by putting some lorem ipsum file with 287613 bytes with different ids should succeed", func() {
-			for _, idToTest := range []string{`test_id`, `{"a":"b"}`, `{"$numberLong":"999999999999999"}`, `{"a":{"b":{"c":{}}}}`} {
-				runPutIDTestCase(idToTest, t)
-			}
-		})
+			},
+		)
 
 		Convey("Testing the 'delete' command with a file that is in GridFS should", func() {
 			mf, err := simpleMongoFilesInstanceWithFilename("delete", "testfile2")
@@ -710,9 +767,10 @@ func TestMongoFilesCommands(t *testing.T) {
 
 		Convey("Testing the 'delete_id' command with a file that is in GridFS should", func() {
 			// hack to grab an _id
-			mf, _ := simpleMongoFilesInstanceWithFilename("get", "testfile2")
-			idString := idOfFile("testfile2")
+			_, err := simpleMongoFilesInstanceWithFilename("get", "testfile2")
+			So(err, ShouldBeNil)
 
+			idString := idOfFile("testfile2")
 			mf, err := simpleMongoFilesInstanceWithID("delete_id", idString)
 			So(err, ShouldBeNil)
 			So(mf, ShouldNotBeNil)
@@ -754,26 +812,40 @@ func TestDefaultWriteConcern(t *testing.T) {
 	Convey("with a URI that doesn't specify write concern", t, func() {
 		mf, err := getMongofilesWithArgs("get", "filename", "--uri", "mongodb://localhost:33333")
 		So(err, ShouldBeNil)
-		So(mf.SessionProvider.DB("test").WriteConcern(), ShouldResemble, writeconcern.New(writeconcern.WMajority()))
+		So(
+			mf.SessionProvider.DB("test").WriteConcern(),
+			ShouldResemble,
+			writeconcern.New(writeconcern.WMajority()),
+		)
 	})
 
 	Convey("with no URI and no write concern option", t, func() {
 		mf, err := getMongofilesWithArgs("get", "filename", "--port", "33333")
 		So(err, ShouldBeNil)
-		So(mf.SessionProvider.DB("test").WriteConcern(), ShouldResemble, writeconcern.New(writeconcern.WMajority()))
+		So(
+			mf.SessionProvider.DB("test").WriteConcern(),
+			ShouldResemble,
+			writeconcern.New(writeconcern.WMajority()),
+		)
 	})
 }
 
 func runPutIDTestCase(idToTest string, t *testing.T) {
 	remoteName := "remoteName"
-	mongoFilesInstance, err := simpleMongoFilesInstanceWithFilenameAndID("put_id", remoteName, idToTest)
+	mongoFilesInstance, err := simpleMongoFilesInstanceWithFilenameAndID(
+		"put_id",
+		remoteName,
+		idToTest,
+	)
 
 	var buff bytes.Buffer
 	log.SetWriter(&buff)
 
 	So(err, ShouldBeNil)
 	So(mongoFilesInstance, ShouldNotBeNil)
-	mongoFilesInstance.StorageOptions.LocalFileName = util.ToUniversalPath("testdata/lorem_ipsum_287613_bytes.txt")
+	mongoFilesInstance.StorageOptions.LocalFileName = util.ToUniversalPath(
+		"testdata/lorem_ipsum_287613_bytes.txt",
+	)
 
 	t.Log("Should correctly insert the file into GridFS")
 	str, err := mongoFilesInstance.Run(false)

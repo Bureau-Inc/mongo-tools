@@ -58,7 +58,14 @@ type CSVConverter struct {
 // NewCSVInputReader returns a CSVInputReader configured to read data from the
 // given io.Reader, extracting only the specified columns using exactly "numDecoders"
 // goroutines.
-func NewCSVInputReader(colSpecs []ColumnSpec, in io.Reader, rejects io.Writer, numDecoders int, ignoreBlanks bool, useArrayIndexFields bool) *CSVInputReader {
+func NewCSVInputReader(
+	colSpecs []ColumnSpec,
+	in io.Reader,
+	rejects io.Writer,
+	numDecoders int,
+	ignoreBlanks bool,
+	useArrayIndexFields bool,
+) *CSVInputReader {
 	szCount := newSizeTrackingReader(newBomDiscardingReader(in))
 	csvReader := csv.NewReader(szCount)
 	// allow variable number of colSpecs in document
@@ -139,7 +146,7 @@ func (r *CSVInputReader) StreamDocument(ordered bool, readDocs chan bson.D) (ret
 		csvErrChan <- streamDocuments(ordered, r.numDecoders, csvRecordChan, readDocs)
 	}()
 
-	return channelQuorumError(csvErrChan, 2)
+	return channelQuorumError(csvErrChan)
 }
 
 // Convert implements the Converter interface for CSV input. It converts a
@@ -153,12 +160,14 @@ func (c CSVConverter) Convert() (b bson.D, err error) {
 		c.useArrayIndexFields,
 	)
 	if _, ok := err.(coercionError); ok {
-		c.Print()
+		if err = c.Print(); err != nil {
+			return
+		}
 		err = nil
 	}
 	return
 }
 
-func (c CSVConverter) Print() {
-	c.rejectWriter.Write(c.data)
+func (c CSVConverter) Print() error {
+	return c.rejectWriter.Write(c.data)
 }

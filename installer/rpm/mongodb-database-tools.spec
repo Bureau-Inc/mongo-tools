@@ -8,7 +8,6 @@ Group: Applications/Databases
 License: Apache
 URL:        http://www.mongodb.com
 Vendor:     MongoDB
-Requires: openssl, cyrus-sasl, cyrus-sasl-plain, cyrus-sasl-gssapi
 Conflicts: mongodb-org-tools <= 4.3.2, mongodb-org-unstable-tools <= 4.3.2, mongodb-enterprise-tools <= 4.3.2, mongodb-enterprise-unstable-tools <= 4.3.2
 BuildRoot: %{_topdir}/BUILD/%{name}-%{version}-%{release}
 
@@ -59,6 +58,8 @@ rm -rf %{buildroot}
 %attr(0644,root,root) /usr/share/doc/mongodb-database-tools/LICENSE.md
 %attr(0644,root,root) /usr/share/doc/mongodb-database-tools/README.md
 %attr(0644,root,root) /usr/share/doc/mongodb-database-tools/THIRD-PARTY-NOTICES
+%attr(0644,root,root) /usr/share/doc/mongodb-database-tools/@TOOLS_BOM_FILE@
+%attr(0644,root,root) /usr/share/doc/mongodb-database-tools/@TOOLS_SARIF_FILE@
 
 %pre
 # On install

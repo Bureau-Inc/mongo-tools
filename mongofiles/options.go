@@ -14,7 +14,7 @@ import (
 	"github.com/mongodb/mongo-tools/common/options"
 )
 
-// Usage string printed as part of --help
+// Usage string printed as part of --help.
 var Usage = `<options> <connection-string> <command> <filename or _id>
 
 Manipulate gridfs files using the command line.
@@ -34,10 +34,17 @@ Possible commands include:
 
 See http://docs.mongodb.com/database-tools/mongofiles/ for more information.`
 
-// ParseOptions reads command line arguments and converts them into options used to configure a MongoFiles instance
+// ParseOptions reads command line arguments and converts them into options used to configure a MongoFiles instance.
 func ParseOptions(rawArgs []string, versionStr, gitCommit string) (Options, error) {
 	// initialize command-line opts
-	opts := options.New("mongofiles", versionStr, gitCommit, Usage, true, options.EnabledOptions{Auth: true, Connection: true, Namespace: false, URI: true})
+	opts := options.New(
+		"mongofiles",
+		versionStr,
+		gitCommit,
+		Usage,
+		true,
+		options.EnabledOptions{Auth: true, Connection: true, Namespace: false, URI: true},
+	)
 
 	storageOpts := &StorageOptions{}
 	inputOpts := &InputOptions{}
@@ -53,20 +60,23 @@ func ParseOptions(rawArgs []string, versionStr, gitCommit string) (Options, erro
 	log.SetVerbosity(opts.Verbosity)
 
 	// verify uri options and log them
-	opts.URI.LogUnsupportedOptions()
+	opts.LogUnsupportedOptions()
 
 	// add the specified database to the namespace options struct
-	opts.Namespace.DB = storageOpts.DB
+	opts.DB = storageOpts.DB
 
 	// set WriteConcern
-	wc, err := db.NewMongoWriteConcern(storageOpts.WriteConcern, opts.URI.ParsedConnString())
+	wc, err := db.NewMongoWriteConcern(storageOpts.WriteConcern, opts.ParsedConnString())
 	if err != nil {
 		return Options{}, fmt.Errorf("error parsing --writeConcern: %v", err)
 	}
 	opts.WriteConcern = wc
 
 	// set ReadPreference
-	opts.ReadPreference, err = db.NewReadPreference(inputOpts.ReadPreference, opts.URI.ParsedConnString())
+	opts.ReadPreference, err = db.NewReadPreference(
+		inputOpts.ReadPreference,
+		opts.ParsedConnString(),
+	)
 	if err != nil {
 		return Options{}, fmt.Errorf("error parsing --readPreference: %v", err)
 	}
@@ -74,7 +84,7 @@ func ParseOptions(rawArgs []string, versionStr, gitCommit string) (Options, erro
 	return Options{opts, storageOpts, inputOpts, extraArgs}, nil
 }
 
-// Options contains all the possible options that can configure mongofiles
+// Options contains all the possible options that can configure mongofiles.
 type Options struct {
 	*options.ToolOptions
 	*StorageOptions

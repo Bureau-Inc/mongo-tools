@@ -8,23 +8,22 @@ package mongorestore
 
 import (
 	"context"
+	"io"
+	"os"
 	"path/filepath"
+	"testing"
 
 	"github.com/mongodb/mongo-tools/common/archive"
 	"github.com/mongodb/mongo-tools/common/log"
 	"github.com/mongodb/mongo-tools/common/options"
 	"github.com/mongodb/mongo-tools/common/testtype"
 	"github.com/mongodb/mongo-tools/common/testutil"
+	"github.com/mongodb/mongo-tools/mongodump"
+	"github.com/pkg/errors"
+	. "github.com/smartystreets/goconvey/convey"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
-
-	. "github.com/smartystreets/goconvey/convey"
-
-	"io"
-	"io/ioutil"
-	"os"
-	"testing"
 )
 
 func init() {
@@ -71,7 +70,12 @@ func TestMongorestoreShortArchive(t *testing.T) {
 		fileSize := fi.Size()
 
 		for i := fileSize; i >= 0; i -= fileSize / 10 {
-			log.Logvf(log.Always, "Restoring from the first %v bytes of a archive of size %v", i, fileSize)
+			log.Logvf(
+				log.Always,
+				"Restoring from the first %v bytes of a archive of size %v",
+				i,
+				fileSize,
+			)
 
 			_, err = file.Seek(0, 0)
 			So(err, ShouldBeNil)
@@ -82,7 +86,7 @@ func TestMongorestoreShortArchive(t *testing.T) {
 
 			restore.archive = &archive.Reader{
 				Prelude: &archive.Prelude{},
-				In:      ioutil.NopCloser(io.LimitReader(file, i)),
+				In:      io.NopCloser(io.LimitReader(file, i)),
 			}
 
 			result := restore.Restore()
@@ -136,11 +140,14 @@ func TestMongorestoreBadFormatArchive(t *testing.T) {
 		defer restore.Close()
 
 		result := restore.Restore()
-		Convey("A mongorestore on an archive with a bad format should error out instead of hang", func() {
-			So(result.Err, ShouldNotBeNil)
-			So(result.Failures, ShouldEqual, 0)
-			So(result.Successes, ShouldEqual, 0)
-		})
+		Convey(
+			"A mongorestore on an archive with a bad format should error out instead of hang",
+			func() {
+				So(result.Err, ShouldNotBeNil)
+				So(result.Failures, ShouldEqual, 0)
+				So(result.Successes, ShouldEqual, 0)
+			},
+		)
 	})
 }
 
@@ -149,6 +156,29 @@ func TestMongorestoreBadFormatArchive(t *testing.T) {
 // CONTRIBUING.md file in the top level of the repo for details on how to
 // write tests using testify.
 // ----------------------------------------------------------------------
+
+func TestReadDumpServerVersionFromArchive(t *testing.T) {
+	require := require.New(t)
+
+	testtype.SkipUnlessTestType(t, testtype.IntegrationTestType)
+
+	withArchiveMongodump(t, func(archivePath string) {
+		sessionProvider, _, err := testutil.GetBareSessionProvider()
+		require.NoError(err)
+		args := []string{
+			NumParallelCollectionsOption, "1",
+			NumInsertionWorkersOption, "1",
+			ArchiveOption + "=" + archivePath,
+		}
+		restore, err := getRestoreWithArgs(args...)
+		require.NoError(err)
+		defer restore.Close()
+
+		_ = restore.Restore()
+		expectedVersion, _ := sessionProvider.ServerVersionArray()
+		require.Equal(restore.dumpServerVersion, expectedVersion)
+	})
+}
 
 func TestMongorestoreArchiveAdminNamespaces(t *testing.T) {
 	require := require.New(t)
@@ -186,11 +216,11 @@ func testRestoreAdminNamespaces(t *testing.T) {
 	adminSuffixedDB := session.Database(adminSuffixedDBName)
 
 	defer func() {
-		err = testDB.Drop(nil)
+		err = testDB.Drop(context.Background())
 		if err != nil {
 			t.Fatalf("Failed to drop test database: %v", err)
 		}
-		err = adminSuffixedDB.Drop(nil)
+		err = adminSuffixedDB.Drop(context.Background())
 		if err != nil {
 			t.Fatalf("Failed to drop admin suffixed database: %v", err)
 		}
@@ -239,11 +269,11 @@ func testRestoreAdminNamespacesAsAtlasProxy(t *testing.T) {
 	adminDB := session.Database(adminDBName)
 	adminSuffixedDB := session.Database(adminSuffixedDBName)
 	defer func() {
-		err = testDB.Drop(nil)
+		err = testDB.Drop(context.Background())
 		if err != nil {
 			t.Fatalf("Failed to drop test database: %v", err)
 		}
-		err = adminSuffixedDB.Drop(nil)
+		err = adminSuffixedDB.Drop(context.Background())
 		if err != nil {
 			t.Fatalf("Failed to drop admin suffixed database: %v", err)
 		}
@@ -323,14 +353,22 @@ func newRestoreNamespaceTestCase(
 	}
 }
 
-func requireCollectionHasNumDocuments(t *testing.T, collection *mongo.Collection, numDocuments int64) {
+func requireCollectionHasNumDocuments(
+	t *testing.T,
+	collection *mongo.Collection,
+	numDocuments int64,
+) {
 	require := require.New(t)
 	count, err := collection.CountDocuments(context.Background(), bson.M{})
 	require.NoError(err, "can count documents")
 	require.EqualValues(numDocuments, count, "found %d document(s)", count)
 }
 
-func createCollectionWithTestDocument(t *testing.T, db *mongo.Database, collectionName string) *mongo.Collection {
+func createCollectionWithTestDocument(
+	t *testing.T,
+	db *mongo.Database,
+	collectionName string,
+) *mongo.Collection {
 	require := require.New(t)
 	collection := db.Collection(collectionName)
 	_, err := collection.InsertOne(
@@ -364,4 +402,53 @@ func runArchiveMongodump(t *testing.T, file string) string {
 	_, err := os.Stat(file)
 	require.NoError(err, "dump created archive data file")
 	return file
+}
+
+// GetArchiveMongoDump returns a MongoDump that’s ready to call Dump().
+func GetArchiveMongoDump(output io.WriteCloser) (*mongodump.MongoDump, error) {
+	provider, toolOpts, err := testutil.GetBareSessionProvider()
+	if err != nil {
+		return nil, errors.Wrap(err, "get session provider for dump")
+	}
+
+	dump := &mongodump.MongoDump{
+		InputOptions: &mongodump.InputOptions{},
+		OutputOptions: &mongodump.OutputOptions{
+			Archive:                "-",
+			NumParallelCollections: 4, // default
+		},
+		SessionProvider: provider,
+		ToolOptions:     toolOpts,
+		OutputWriter:    output,
+	}
+
+	err = dump.Init()
+	if err != nil {
+		return nil, errors.Wrap(err, "init mongodump")
+	}
+
+	return dump, nil
+}
+
+func GetArchiveMongoRestore(input io.ReadCloser) (*MongoRestore, error) {
+	_, toolOpts, err := testutil.GetBareSessionProvider()
+	if err != nil {
+		return nil, errors.Wrap(err, "get session provider for dump")
+	}
+
+	restore, err := New(Options{
+		ToolOptions: toolOpts,
+		InputOptions: &InputOptions{
+			Archive: "-",
+		},
+		OutputOptions: &OutputOptions{
+			NumInsertionWorkers: 1,
+		},
+	})
+	if err != nil {
+		return nil, errors.Wrap(err, "create mongorestore")
+	}
+	restore.InputReader = input
+
+	return restore, nil
 }

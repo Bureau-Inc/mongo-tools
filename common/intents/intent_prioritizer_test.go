@@ -64,6 +64,7 @@ func TestBasicDBHeapBehavior(t *testing.T) {
 			Convey("they should pop in active order, least to greatest", func() {
 				prev := -1
 				for dbheap.Len() > 0 {
+					//nolint:errcheck // the heap only contains *dbCounter values
 					popped := heap.Pop(dbheap).(*dbCounter)
 					So(popped.active, ShouldBeGreaterThan, prev)
 					prev = popped.active
@@ -81,6 +82,7 @@ func TestBasicDBHeapBehavior(t *testing.T) {
 			Convey("they should pop in bson size order, greatest to least", func() {
 				prev := int64(1024*1024 + 1) // Maximum
 				for dbheap.Len() > 0 {
+					//nolint:errcheck // the heap only contains *dbCounter values
 					popped := heap.Pop(dbheap).(*dbCounter)
 					So(popped.collections[0].Size, ShouldBeLessThan, prev)
 					prev = popped.collections[0].Size
@@ -135,14 +137,17 @@ func TestBySizeAndView(t *testing.T) {
 			},
 		}
 		prioritizer = newLongestTaskFirstPrioritizer(intents)
-		Convey("getting the sorted intents should produce views first, followed by largest to smallest", func() {
+		Convey(
+			"getting the sorted intents should produce views first, followed by largest to smallest",
+			func() {
 
-			So(prioritizer.Get().C, ShouldEqual, "view")
-			So(prioritizer.Get().C, ShouldEqual, "view")
-			So(prioritizer.Get().C, ShouldEqual, "non-view1")
-			So(prioritizer.Get().C, ShouldEqual, "non-view2")
-			So(prioritizer.Get().C, ShouldEqual, "non-view3")
-		})
+				So(prioritizer.Get().C, ShouldEqual, "view")
+				So(prioritizer.Get().C, ShouldEqual, "view")
+				So(prioritizer.Get().C, ShouldEqual, "non-view1")
+				So(prioritizer.Get().C, ShouldEqual, "non-view2")
+				So(prioritizer.Get().C, ShouldEqual, "non-view3")
+			},
+		)
 
 	})
 
@@ -198,13 +203,21 @@ func TestSimulatedMultiDBJob(t *testing.T) {
 						So(i3.DB, ShouldEqual, "db1")
 
 						Convey("which means that there should be two active db1 jobs", func() {
-							counter := prioritizer.(*multiDatabaseLTFPrioritizer).counterMap["db1"]
+							prioConcrete, ok := prioritizer.(*multiDatabaseLTFPrioritizer)
+							So(ok, ShouldBeTrue)
+
+							counter, ok := prioConcrete.counterMap["db1"]
+							So(ok, ShouldBeTrue)
+
 							So(counter.active, ShouldEqual, 2)
 						})
 					})
 
 					Convey("the heap should now be empty", func() {
-						So(prioritizer.(*multiDatabaseLTFPrioritizer).dbHeap.Len(), ShouldEqual, 0)
+						prioConcrete, ok := prioritizer.(*multiDatabaseLTFPrioritizer)
+						So(ok, ShouldBeTrue)
+
+						So(prioConcrete.dbHeap.Len(), ShouldEqual, 0)
 					})
 				})
 			})

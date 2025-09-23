@@ -24,7 +24,6 @@ import (
 	"github.com/mongodb/mongo-tools/common/intents"
 	"github.com/mongodb/mongo-tools/common/log"
 	"github.com/mongodb/mongo-tools/common/util"
-
 	"golang.org/x/exp/slices"
 )
 
@@ -32,18 +31,6 @@ type NilPos struct{}
 
 func (NilPos) Pos() int64 {
 	return -1
-}
-
-// writeFlusher wraps an io.Writer and adds a Flush function.
-type writeFlusher interface {
-	Flush() error
-	io.Writer
-}
-
-// writeFlushCloser is a writeFlusher implementation which exposes
-// a Close function which is implemented by calling Flush.
-type writeFlushCloser struct {
-	writeFlusher
 }
 
 // errorReader implements io.Reader.
@@ -54,13 +41,8 @@ func (errorReader) Read([]byte) (int, error) {
 	return 0, os.ErrInvalid
 }
 
-// Close calls Flush.
-func (bwc writeFlushCloser) Close() error {
-	return bwc.Flush()
-}
-
 // realBSONFile implements the intents.file interface. It lets intents write to real BSON files
-// ok disk via an embedded bufio.Writer
+// ok disk via an embedded bufio.Writer.
 type realBSONFile struct {
 	io.WriteCloser
 	path string
@@ -72,7 +54,7 @@ type realBSONFile struct {
 }
 
 // Open is part of the intents.file interface. realBSONFiles need to have Open called before
-// Read can be called
+// Read can be called.
 func (f *realBSONFile) Open() (err error) {
 	if f.path == "" {
 		// This should not occur normally. All realBSONFile's should have a path
@@ -93,7 +75,7 @@ func (f *realBSONFile) Open() (err error) {
 	return nil
 }
 
-// realMetadataFile implements intent.file, and corresponds to a Metadata file on disk
+// realMetadataFile implements intent.file, and corresponds to a Metadata file on disk.
 type realMetadataFile struct {
 	io.WriteCloser
 	path string
@@ -123,7 +105,7 @@ func (f *realMetadataFile) Open() (err error) {
 }
 
 // stdoutFile implements the intents.file interface. stdoutFiles are used when single collections
-// are written directly (non-archive-mode) to standard out, via "--dir -"
+// are written directly (non-archive-mode) to standard out, via "--dir -".
 type stdoutFile struct {
 	io.Writer
 	errorReader
@@ -184,7 +166,9 @@ func (dump *MongoDump) shouldSkipSystemNamespace(dbName, collName string) bool {
 
 func isReshardingCollection(collName string) bool {
 	switch collName {
-	case "reshardingOperations", "localReshardingOperations.donor", "localReshardingOperations.recipient":
+	case "reshardingOperations",
+		"localReshardingOperations.donor",
+		"localReshardingOperations.recipient":
 		return true
 	default:
 		return false
@@ -223,6 +207,7 @@ func (dump *MongoDump) outputPath(dbName, colName string) string {
 	escapedColName := util.EscapeCollectionName(colName)
 	if len(escapedColName) > 238 {
 		colNameTruncated := escapedColName[:208]
+		// #nosec G401 -- we do not use this digest algorithm in a security-sensitive way.
 		colNameHashBytes := sha1.Sum([]byte(colName))
 		colNameHashBase64 := base64.RawURLEncoding.EncodeToString(colNameHashBytes[:])
 
@@ -233,7 +218,7 @@ func (dump *MongoDump) outputPath(dbName, colName string) string {
 	return filepath.Join(root, dbName, escapedColName)
 }
 
-// CreateOplogIntents creates an intents.Intent for the oplog and adds it to the manager
+// CreateOplogIntents creates an intents.Intent for the oplog and adds it to the manager.
 func (dump *MongoDump) CreateOplogIntents() error {
 	err := dump.determineOplogCollectionName()
 	if err != nil {
@@ -254,7 +239,7 @@ func (dump *MongoDump) CreateOplogIntents() error {
 
 // CreateUsersRolesVersionIntentsForDB create intents to be written in to the specific
 // database folder, for the users, roles and version admin database collections
-// And then it adds the intents in to the manager
+// And then it adds the intents in to the manager.
 func (dump *MongoDump) CreateUsersRolesVersionIntentsForDB(db string) error {
 
 	outDir := dump.outputPath(db, "")
@@ -315,7 +300,10 @@ func (dump *MongoDump) CreateCollectionIntent(dbName, colName string) error {
 	return nil
 }
 
-func (dump *MongoDump) NewIntentFromOptions(dbName string, ci *db.CollectionInfo) (*intents.Intent, error) {
+func (dump *MongoDump) NewIntentFromOptions(
+	dbName string,
+	ci *db.CollectionInfo,
+) (*intents.Intent, error) {
 	intent := &intents.Intent{
 		DB:      dbName,
 		C:       ci.Name,
@@ -383,11 +371,13 @@ func (dump *MongoDump) NewIntentFromOptions(dbName string, ci *db.CollectionInfo
 		return nil, err
 	}
 	log.Logvf(log.DebugHigh, "Getting estimated count for %v.%v", dbName, ci.Name)
-	count, err := session.Database(dbName).Collection(ci.Name).EstimatedDocumentCount(context.Background())
+	count, err := session.Database(dbName).
+		Collection(ci.Name).
+		EstimatedDocumentCount(context.Background())
 	if err != nil {
 		return nil, fmt.Errorf("error counting %v: %v", intent.Namespace(), err)
 	}
-	intent.Size = int64(count)
+	intent.Size = count
 	return intent, nil
 }
 
@@ -407,7 +397,7 @@ func (dump *MongoDump) CreateIntentsForDatabase(dbName string) error {
 	}
 	defer colsIter.Close(context.Background())
 
-	for colsIter.Next(nil) {
+	for colsIter.Next(context.TODO()) {
 		collInfo := &db.CollectionInfo{}
 		err = colsIter.Decode(collInfo)
 		if err != nil {
@@ -417,11 +407,18 @@ func (dump *MongoDump) CreateIntentsForDatabase(dbName string) error {
 		// This MUST precede the remaining checks since it avoids
 		// a mid-reshard backup.
 		if dbName == "config" && dump.OutputOptions.Oplog && isReshardingCollection(collInfo.Name) {
-			return fmt.Errorf("detected resharding in progress. Cannot dump with --oplog while resharding")
+			return fmt.Errorf(
+				"detected resharding in progress. Cannot dump with --oplog while resharding",
+			)
 		}
 
 		if dump.shouldSkipSystemNamespace(dbName, collInfo.Name) {
-			log.Logvf(log.DebugHigh, "will not dump system collection '%s.%s'", dbName, collInfo.Name)
+			log.Logvf(
+				log.DebugHigh,
+				"will not dump system collection '%s.%s'",
+				dbName,
+				collInfo.Name,
+			)
 			continue
 		}
 
@@ -431,7 +428,12 @@ func (dump *MongoDump) CreateIntentsForDatabase(dbName string) error {
 		}
 
 		if dump.OutputOptions.ViewsAsCollections && !collInfo.IsView() {
-			log.Logvf(log.DebugLow, "skipping dump of %v.%v because it is not a view", dbName, collInfo.Name)
+			log.Logvf(
+				log.DebugLow,
+				"skipping dump of %v.%v because it is not a view",
+				dbName,
+				collInfo.Name,
+			)
 			continue
 		}
 		intent, err := dump.NewIntentFromOptions(dbName, collInfo)
@@ -445,7 +447,10 @@ func (dump *MongoDump) CreateIntentsForDatabase(dbName string) error {
 
 func (dump *MongoDump) GetValidDbs() ([]string, error) {
 	var validDbs []string
-	dump.SessionProvider.GetSession()
+	_, err := dump.SessionProvider.GetSession()
+	if err != nil {
+		return nil, fmt.Errorf("error getting session: %v", err)
+	}
 	dbs, err := dump.SessionProvider.DatabaseNames()
 	if err != nil {
 		return nil, fmt.Errorf("error getting database names: %v", err)

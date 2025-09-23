@@ -8,7 +8,7 @@ package mongoexport
 
 import (
 	"fmt"
-	"io/ioutil"
+	"os"
 
 	"github.com/mongodb/mongo-tools/common/db"
 	"github.com/mongodb/mongo-tools/common/log"
@@ -84,7 +84,7 @@ func (inputOptions *InputOptions) GetQuery() ([]byte, error) {
 	if inputOptions.Query != "" {
 		return []byte(inputOptions.Query), nil
 	} else if inputOptions.QueryFile != "" {
-		content, err := ioutil.ReadFile(inputOptions.QueryFile)
+		content, err := os.ReadFile(inputOptions.QueryFile)
 		if err != nil {
 			err = fmt.Errorf("error reading queryFile: %s", err)
 		}
@@ -125,18 +125,26 @@ func ParseOptions(rawArgs []string, versionStr, gitCommit string) (Options, erro
 	log.SetVerbosity(opts.Verbosity)
 
 	// verify URI options and log them
-	opts.URI.LogUnsupportedOptions()
+	opts.LogUnsupportedOptions()
 
 	if inputOpts.SlaveOk {
 		if inputOpts.ReadPreference != "" {
-			return Options{}, fmt.Errorf("--slaveOk can't be specified when --readPreference is specified")
+			return Options{}, fmt.Errorf(
+				"--slaveOk can't be specified when --readPreference is specified",
+			)
 		}
 
-		log.Logvf(log.Always, "--slaveOk is deprecated and --readPreference=nearest should be used instead")
+		log.Logvf(
+			log.Always,
+			"--slaveOk is deprecated and --readPreference=nearest should be used instead",
+		)
 		inputOpts.ReadPreference = "nearest"
 	}
 
-	opts.ReadPreference, err = db.NewReadPreference(inputOpts.ReadPreference, opts.URI.ParsedConnString())
+	opts.ReadPreference, err = db.NewReadPreference(
+		inputOpts.ReadPreference,
+		opts.ParsedConnString(),
+	)
 	if err != nil {
 		return Options{}, fmt.Errorf("error parsing --readPreference: %v", err)
 	}

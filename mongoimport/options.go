@@ -139,9 +139,9 @@ func ParseOptions(rawArgs []string, versionStr, gitCommit string) (Options, erro
 	}
 
 	log.SetVerbosity(opts.Verbosity)
-	opts.URI.LogUnsupportedOptions()
+	opts.LogUnsupportedOptions()
 
-	wc, err := db.NewMongoWriteConcern(ingestOpts.WriteConcern, opts.URI.ParsedConnString())
+	wc, err := db.NewMongoWriteConcern(ingestOpts.WriteConcern, opts.ParsedConnString())
 	if err != nil {
 		return Options{}, fmt.Errorf("error constructing write concern: %v", err)
 	}
@@ -150,7 +150,9 @@ func ParseOptions(rawArgs []string, versionStr, gitCommit string) (Options, erro
 	// ensure either a positional argument is supplied or an argument is passed
 	// to the --file flag - and not both
 	if inputOpts.File != "" && len(extraArgs) != 0 {
-		return Options{}, fmt.Errorf("error parsing positional arguments: cannot use both --file and a positional argument to set the input file")
+		return Options{}, fmt.Errorf(
+			"error parsing positional arguments: cannot use both --file and a positional argument to set the input file",
+		)
 	}
 
 	if inputOpts.File == "" {

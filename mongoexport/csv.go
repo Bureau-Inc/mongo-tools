@@ -9,16 +9,17 @@ package mongoexport
 import (
 	"encoding/csv"
 	"fmt"
-	"github.com/mongodb/mongo-tools/common/bsonutil"
-	"github.com/mongodb/mongo-tools/common/json"
-	"go.mongodb.org/mongo-driver/bson"
 	"io"
 	"reflect"
 	"strconv"
 	"strings"
+
+	"github.com/mongodb/mongo-tools/common/bsonutil"
+	"github.com/mongodb/mongo-tools/common/json"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
-// type for reflect code
+// type for reflect code.
 var marshalDType = reflect.TypeOf(bsonutil.MarshalD{})
 
 // CSVExportOutput is an implementation of ExportOutput that writes documents to the output in CSV format.
@@ -51,14 +52,16 @@ func NewCSVExportOutput(fields []string, noHeaderLine bool, out io.Writer) *CSVE
 // WriteHeader writes a comma-delimited list of fields as the output header row.
 func (csvExporter *CSVExportOutput) WriteHeader() error {
 	if !csvExporter.NoHeaderLine {
-		csvExporter.csvWriter.Write(csvExporter.Fields)
+		if err := csvExporter.csvWriter.Write(csvExporter.Fields); err != nil {
+			return err
+		}
 		return csvExporter.csvWriter.Error()
 	}
 	return nil
 }
 
 // WriteFooter is a no-op for CSV export formats.
-func (csvExporter *CSVExportOutput) WriteFooter() error {
+func (_ *CSVExportOutput) WriteFooter() error {
 	// no CSV footer
 	return nil
 }
@@ -95,7 +98,9 @@ func (csvExporter *CSVExportOutput) ExportDocument(document bson.D) error {
 			rowOut = append(rowOut, fmt.Sprintf("%v", fieldVal))
 		}
 	}
-	csvExporter.csvWriter.Write(rowOut)
+	if err = csvExporter.csvWriter.Write(rowOut); err != nil {
+		return err
+	}
 	csvExporter.NumExported++
 	return csvExporter.csvWriter.Error()
 }
@@ -105,7 +110,7 @@ func (csvExporter *CSVExportOutput) ExportDocument(document bson.D) error {
 // It will also handle dot-delimited field names for nested arrays or documents.
 func extractFieldByName(fieldName string, document interface{}) interface{} {
 	dotParts := strings.Split(fieldName, ".")
-	var subdoc interface{} = document
+	var subdoc = document
 
 	for _, path := range dotParts {
 		docValue := reflect.ValueOf(subdoc)
@@ -114,15 +119,17 @@ func extractFieldByName(fieldName string, document interface{}) interface{} {
 		}
 		docType := docValue.Type()
 		docKind := docType.Kind()
-		if docKind == reflect.Map {
+		switch docKind {
+		case reflect.Map:
 			subdocVal := docValue.MapIndex(reflect.ValueOf(path))
 			if subdocVal.Kind() == reflect.Invalid {
 				return ""
 			}
 			subdoc = subdocVal.Interface()
-		} else if docKind == reflect.Slice {
+		case reflect.Slice:
 			if docType == marshalDType {
 				// dive into a D as a document
+				//nolint:errcheck
 				asD := bson.D(subdoc.(bsonutil.MarshalD))
 				var err error
 				subdoc, err = bsonutil.FindValueByKey(path, &asD)
@@ -145,7 +152,7 @@ func extractFieldByName(fieldName string, document interface{}) interface{} {
 				}
 				subdoc = subdocVal.Interface()
 			}
-		} else {
+		default:
 			// trying to index into a non-compound type - just return blank.
 			return ""
 		}

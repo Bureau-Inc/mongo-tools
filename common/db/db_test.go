@@ -8,19 +8,17 @@ package db
 
 import (
 	"context"
-	"io/ioutil"
 	"os"
 	"testing"
-
-	"go.mongodb.org/mongo-driver/x/mongo/driver/connstring"
 
 	"github.com/mongodb/mongo-tools/common/options"
 	"github.com/mongodb/mongo-tools/common/testtype"
 	. "github.com/smartystreets/goconvey/convey"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/x/mongo/driver/connstring"
 )
 
-// var block and functions copied from testutil to avoid import cycle
+// var block and functions copied from testutil to avoid import cycle.
 var (
 	UserAdmin              = "uAdmin"
 	UserAdminPassword      = "password"
@@ -61,7 +59,7 @@ func DBGetConnString() *options.URI {
 	if testtype.HasTestType(testtype.SSLTestType) {
 		return &options.URI{
 			//ConnectionString: "mongodb://localhost" + DefaultTestPort + "/",
-			ConnString: connstring.ConnString{
+			ConnString: &connstring.ConnString{
 				SSLCaFileSet:                   true,
 				SSLCaFile:                      "../db/testdata/ca-ia.pem",
 				SSLClientCertificateKeyFileSet: true,
@@ -130,7 +128,9 @@ func TestConfigureClientForSRV(t *testing.T) {
 		toolOptions := options.New("test", "", "", "", true, enabled)
 		// AuthSource without a username is invalid, we want to check the URI does not get
 		// validated as part of client configuration
-		_, err := toolOptions.ParseArgs([]string{"--uri", "mongodb://foo/?authSource=admin", "--username", "bar"})
+		_, err := toolOptions.ParseArgs(
+			[]string{"--uri", "mongodb://foo/?authSource=admin", "--username", "bar"},
+		)
 		So(err, ShouldBeNil)
 
 		_, err = configureClient(*toolOptions)
@@ -205,7 +205,8 @@ func TestFindOne(t *testing.T) {
 		client, err := provider.GetSession()
 		So(err, ShouldBeNil)
 		coll := client.Database("exists").Collection("collection")
-		coll.InsertOne(context.Background(), bson.D{})
+		_, err = coll.InsertOne(context.Background(), bson.D{})
+		So(err, ShouldBeNil)
 
 		Convey("When FindOneis called", func() {
 			res := bson.D{}
@@ -264,7 +265,7 @@ func TestGetIndexes(t *testing.T) {
 				indexesIter, err := GetIndexes(missing)
 				So(err, ShouldBeNil)
 				Convey("and there should be no indexes", func() {
-					So(indexesIter.Next(nil), ShouldBeFalse)
+					So(indexesIter.Next(context.Background()), ShouldBeFalse)
 				})
 			})
 
@@ -272,25 +273,17 @@ func TestGetIndexes(t *testing.T) {
 				indexesIter, err := GetIndexes(missingDB)
 				So(err, ShouldBeNil)
 				Convey("and there should be no indexes", func() {
-					So(indexesIter.Next(nil), ShouldBeFalse)
+					So(indexesIter.Next(context.Background()), ShouldBeFalse)
 				})
 			})
 		})
 
 		Reset(func() {
-			provider.DropDatabase("exists")
+			err = provider.DropDatabase("exists")
+			So(err, ShouldBeNil)
 			provider.Close()
 		})
 	})
-}
-
-type listDatabasesCommand struct {
-	Databases []map[string]interface{} `json:"databases"`
-	Ok        bool                     `json:"ok"`
-}
-
-func (*listDatabasesCommand) AsRunnable() interface{} {
-	return "listDatabases"
 }
 
 func TestServerVersionArray(t *testing.T) {
@@ -325,26 +318,29 @@ func TestServerCertificateVerification(t *testing.T) {
 	auth := DBGetAuthOptions()
 	sslOrigin := DBGetSSLOptions()
 	Convey("When initializing a session provider", t, func() {
-		Convey("connection shall succeed if provided with intermediate certificate only as well", func() {
-			ssl := sslOrigin
-			ssl.SSLCAFile = "../db/testdata/ia.pem"
-			opts := options.ToolOptions{
-				Connection: &options.Connection{
-					Port:    DefaultTestPort,
-					Timeout: 10,
-				},
-				URI:  DBGetConnString(),
-				SSL:  &ssl,
-				Auth: &auth,
-			}
-			opts.URI.ConnString.SSLCaFile = "../db/testdata/ia.pem"
-			provider, err := NewSessionProvider(opts)
-			So(err, ShouldBeNil)
-			So(provider.client.Ping(context.Background(), nil), ShouldBeNil)
-			Convey("and should be closeable", func() {
-				provider.Close()
-			})
-		})
+		Convey(
+			"connection shall succeed if provided with intermediate certificate only as well",
+			func() {
+				ssl := sslOrigin
+				ssl.SSLCAFile = "../db/testdata/ia.pem"
+				opts := options.ToolOptions{
+					Connection: &options.Connection{
+						Port:    DefaultTestPort,
+						Timeout: 10,
+					},
+					URI:  DBGetConnString(),
+					SSL:  &ssl,
+					Auth: &auth,
+				}
+				opts.ConnString.SSLCaFile = "../db/testdata/ia.pem"
+				provider, err := NewSessionProvider(opts)
+				So(err, ShouldBeNil)
+				So(provider.client.Ping(context.Background(), nil), ShouldBeNil)
+				Convey("and should be closeable", func() {
+					provider.Close()
+				})
+			},
+		)
 	})
 }
 
@@ -370,7 +366,7 @@ func TestServerPKCS8Verification(t *testing.T) {
 				SSL:  &ssl,
 				Auth: &auth,
 			}
-			opts.URI.ConnString.SSLCaFile = "../db/testdata/ca-ia.pem"
+			opts.ConnString.SSLCaFile = "../db/testdata/ca-ia.pem"
 			provider, err := NewSessionProvider(opts)
 			So(err, ShouldBeNil)
 			So(provider.client.Ping(context.Background(), nil), ShouldBeNil)
@@ -391,7 +387,7 @@ func TestServerPKCS8Verification(t *testing.T) {
 				SSL:  &ssl,
 				Auth: &auth,
 			}
-			opts.URI.ConnString.SSLCaFile = "../db/testdata/ca-ia.pem"
+			opts.ConnString.SSLCaFile = "../db/testdata/ca-ia.pem"
 			provider, err := NewSessionProvider(opts)
 			So(err, ShouldBeNil)
 			So(provider.client.Ping(context.Background(), nil), ShouldBeNil)
@@ -403,7 +399,8 @@ func TestServerPKCS8Verification(t *testing.T) {
 }
 
 func TestAuthConnection(t *testing.T) {
-	if !testtype.HasTestType(testtype.AWSAuthTestType) && !testtype.HasTestType(testtype.KerberosTestType) {
+	if !testtype.HasTestType(testtype.AWSAuthTestType) &&
+		!testtype.HasTestType(testtype.KerberosTestType) {
 		t.SkipNow()
 	}
 	Convey("With an AWS or Keberos auth URI", t, func() {
@@ -411,7 +408,7 @@ func TestAuthConnection(t *testing.T) {
 
 		var uri string
 		if testtype.HasTestType(testtype.AWSAuthTestType) {
-			uriBytes, err := ioutil.ReadFile("../testdata/lib/MONGOD_URI")
+			uriBytes, err := os.ReadFile("../testdata/lib/MONGOD_URI")
 			if err != nil {
 				panic("Could not read MONGOD_URI file")
 			}
@@ -446,10 +443,83 @@ func TestConfigureClientMultipleHosts(t *testing.T) {
 		}
 
 		toolOptions := options.New("test", "", "", "", true, enabled)
-		_, err := toolOptions.ParseArgs([]string{"--uri", "mongodb://localhost:27017,localhost:27018/test"})
+		_, err := toolOptions.ParseArgs(
+			[]string{"--uri", "mongodb://localhost:27017,localhost:27018/test"},
+		)
 		So(err, ShouldBeNil)
 
 		_, err = configureClient(*toolOptions)
 		So(err, ShouldBeNil)
 	})
+}
+
+func TestConfigureClientAKS(t *testing.T) {
+	testtype.SkipUnlessTestType(t, testtype.UnitTestType)
+	Convey(
+		"Configuring options with azure ENVIRONMENT and proper OS environments set should use the AKSCallback",
+		t,
+		func() {
+			enabled := options.EnabledOptions{
+				Auth:       true,
+				Connection: true,
+				Namespace:  true,
+				URI:        true,
+			}
+
+			os.Setenv("AZURE_APP_CLIENT_ID", "test")
+			os.Setenv("AZURE_IDENTITY_CLIENT_ID", "test")
+			os.Setenv("AZURE_TENANT_ID", "test")
+			os.Setenv("AZURE_FEDERATED_TOKEN_FILE", "test")
+			toolOptions := options.New("test", "", "", "", true, enabled)
+			_, err := toolOptions.ParseArgs(
+				[]string{
+					"--uri",
+					"mongodb://test.net/?directConnection=true&tls=true&authMechanism=MONGODB-OIDC&authMechanismProperties=ENVIRONMENT:azure",
+				},
+			)
+			So(err, ShouldBeNil)
+
+			_, err = configureClient(*toolOptions)
+			So(err, ShouldBeNil)
+			So(toolOptions.Mechanism, ShouldEqual, "MONGODB-OIDC")
+			os.Unsetenv("AZURE_APP_CLIENT_ID")
+			os.Unsetenv("AZURE_IDENTITY_CLIENT_ID")
+			os.Unsetenv("AZURE_TENANT_ID")
+			os.Unsetenv("AZURE_FEDERATED_TOKEN_FILE")
+		},
+	)
+}
+
+func TestMissConfigureClientAKS(t *testing.T) {
+	testtype.SkipUnlessTestType(t, testtype.UnitTestType)
+	Convey(
+		"Configuring options with azure ENVIRONMENT and strict subset of OS environments set should be an error",
+		t,
+		func() {
+			enabled := options.EnabledOptions{
+				Auth:       true,
+				Connection: true,
+				Namespace:  true,
+				URI:        true,
+			}
+
+			os.Setenv("AZURE_APP_CLIENT_ID", "test")
+			os.Setenv("AZURE_IDENTITY_CLIENT_ID", "test")
+			os.Setenv("AZURE_TENANT_ID", "test")
+			toolOptions := options.New("test", "", "", "", true, enabled)
+			_, err := toolOptions.ParseArgs(
+				[]string{
+					"--uri",
+					"mongodb://test.net/?directConnection=true&tls=true&authMechanism=MONGODB-OIDC&authMechanismProperties=ENVIRONMENT:azure",
+				},
+			)
+			So(err, ShouldBeNil)
+
+			_, err = configureClient(*toolOptions)
+			So(err, ShouldNotBeNil)
+			os.Unsetenv("AZURE_APP_CLIENT_ID")
+			os.Unsetenv("AZURE_IDENTITY_CLIENT_ID")
+			os.Unsetenv("AZURE_TENANT_ID")
+		},
+	)
 }

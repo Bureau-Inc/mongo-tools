@@ -5,7 +5,7 @@
 // a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
 //
 // Based on github.com/golang/go by The Go Authors
-// See THIRD-PARTY-NOTICES for original license terms.
+// See cyclonedx.sbom.json for original license terms.
 
 package json
 
@@ -38,16 +38,7 @@ type V struct {
 	F3 Number
 }
 
-// ifaceNumAsFloat64/ifaceNumAsNumber are used to test unmarshaling with and
-// without UseNumber
-var ifaceNumAsFloat64 = map[string]interface{}{
-	"k1": float64(1),
-	"k2": "s",
-	"k3": []interface{}{float64(1), float64(2.0), float64(3e-3)},
-	"k4": map[string]interface{}{"kk1": "s", "kk2": float64(2)},
-}
-
-// ifaceNumAsMixedTypes is used to test unmarshalling with extended JSON
+// ifaceNumAsMixedTypes is used to test unmarshalling with extended JSON.
 var ifaceNumAsMixedTypes = map[string]interface{}{
 	"k1": int32(1),
 	"k2": "s",
@@ -63,6 +54,7 @@ var ifaceNumAsNumber = map[string]interface{}{
 }
 
 type tx struct {
+	//nolint:unused
 	x int
 }
 
@@ -85,7 +77,7 @@ type unmarshalerText struct {
 	T bool
 }
 
-// needed for re-marshaling tests
+// needed for re-marshaling tests.
 func (u *unmarshalerText) MarshalText() ([]byte, error) {
 	return []byte(""), nil
 }
@@ -246,12 +238,35 @@ var unmarshalTests = []unmarshalTest{
 	{in: `"g-clef: \uD834\uDD1E"`, ptr: new(string), out: "g-clef: \U0001D11E"},
 	{in: `"invalid: \uD834x\uDD1E"`, ptr: new(string), out: "invalid: \uFFFDx\uFFFD"},
 	{in: "null", ptr: new(interface{}), out: nil},
-	{in: `{"X": [1,2,3], "Y": 4}`, ptr: new(T), out: T{Y: 4}, err: &UnmarshalTypeError{"array", reflect.TypeOf("")}},
+	{
+		in:  `{"X": [1,2,3], "Y": 4}`,
+		ptr: new(T),
+		out: T{Y: 4},
+		err: &UnmarshalTypeError{"array", reflect.TypeOf("")},
+	},
 	{in: `{"x": 1}`, ptr: new(tx), out: tx{}},
-	{in: `{"F1":1,"F2":2,"F3":3}`, ptr: new(V), out: V{F1: int32(1), F2: int32(2), F3: Number("3")}},
-	{in: `{"F1":1,"F2":2,"F3":3}`, ptr: new(V), out: V{F1: Number("1"), F2: int32(2), F3: Number("3")}, useNumber: true},
-	{in: `{"k1":1,"k2":"s","k3":[1,2,3e-3],"k4":{"kk1":"s","kk2":2}}`, ptr: new(interface{}), out: ifaceNumAsMixedTypes},
-	{in: `{"k1":1,"k2":"s","k3":[1,2.0,3e-3],"k4":{"kk1":"s","kk2":2}}`, ptr: new(interface{}), out: ifaceNumAsNumber, useNumber: true},
+	{
+		in:  `{"F1":1,"F2":2,"F3":3}`,
+		ptr: new(V),
+		out: V{F1: int32(1), F2: int32(2), F3: Number("3")},
+	},
+	{
+		in:        `{"F1":1,"F2":2,"F3":3}`,
+		ptr:       new(V),
+		out:       V{F1: Number("1"), F2: int32(2), F3: Number("3")},
+		useNumber: true,
+	},
+	{
+		in:  `{"k1":1,"k2":"s","k3":[1,2,3e-3],"k4":{"kk1":"s","kk2":2}}`,
+		ptr: new(interface{}),
+		out: ifaceNumAsMixedTypes,
+	},
+	{
+		in:        `{"k1":1,"k2":"s","k3":[1,2.0,3e-3],"k4":{"kk1":"s","kk2":2}}`,
+		ptr:       new(interface{}),
+		out:       ifaceNumAsNumber,
+		useNumber: true,
+	},
 
 	// raw values with whitespace
 	{in: "\n true ", ptr: new(bool), out: true},
@@ -270,17 +285,36 @@ var unmarshalTests = []unmarshalTest{
 	// syntax errors
 	{in: `{"X": "foo", "Y"}`, err: &SyntaxError{"invalid character '}' after object key", 17}},
 	{in: `[1, 2, 3+]`, err: &SyntaxError{"invalid character '+' after array element", 9}},
-	{in: `{"X":12x}`, err: &SyntaxError{"invalid character 'x' after object key:value pair", 8}, useNumber: true},
+	{
+		in:        `{"X":12x}`,
+		err:       &SyntaxError{"invalid character 'x' after object key:value pair", 8},
+		useNumber: true,
+	},
 
 	// raw value errors
-	{in: "\x01 42", err: &SyntaxError{"invalid character '\\x01' looking for beginning of value", 1}},
+	{
+		in:  "\x01 42",
+		err: &SyntaxError{"invalid character '\\x01' looking for beginning of value", 1},
+	},
 	{in: " 42 \x01", err: &SyntaxError{"invalid character '\\x01' after top-level value", 5}},
-	{in: "\x01 true", err: &SyntaxError{"invalid character '\\x01' looking for beginning of value", 1}},
+	{
+		in:  "\x01 true",
+		err: &SyntaxError{"invalid character '\\x01' looking for beginning of value", 1},
+	},
 	{in: " false \x01", err: &SyntaxError{"invalid character '\\x01' after top-level value", 8}},
-	{in: "\x01 1.2", err: &SyntaxError{"invalid character '\\x01' looking for beginning of value", 1}},
+	{
+		in:  "\x01 1.2",
+		err: &SyntaxError{"invalid character '\\x01' looking for beginning of value", 1},
+	},
 	{in: " 3.4 \x01", err: &SyntaxError{"invalid character '\\x01' after top-level value", 6}},
-	{in: "\x01 \"string\"", err: &SyntaxError{"invalid character '\\x01' looking for beginning of value", 1}},
-	{in: " \"string\" \x01", err: &SyntaxError{"invalid character '\\x01' after top-level value", 11}},
+	{
+		in:  "\x01 \"string\"",
+		err: &SyntaxError{"invalid character '\\x01' looking for beginning of value", 1},
+	},
+	{
+		in:  " \"string\" \x01",
+		err: &SyntaxError{"invalid character '\\x01' after top-level value", 11},
+	},
 
 	// array tests
 	{in: `[1, 2, 3]`, ptr: new([3]int), out: [3]int{1, 2, 3}},
@@ -290,8 +324,16 @@ var unmarshalTests = []unmarshalTest{
 	// empty array to interface test
 	{in: `[]`, ptr: new([]interface{}), out: []interface{}{}},
 	{in: `null`, ptr: new([]interface{}), out: []interface{}(nil)},
-	{in: `{"T":[]}`, ptr: new(map[string]interface{}), out: map[string]interface{}{"T": []interface{}{}}},
-	{in: `{"T":null}`, ptr: new(map[string]interface{}), out: map[string]interface{}{"T": interface{}(nil)}},
+	{
+		in:  `{"T":[]}`,
+		ptr: new(map[string]interface{}),
+		out: map[string]interface{}{"T": []interface{}{}},
+	},
+	{
+		in:  `{"T":null}`,
+		ptr: new(map[string]interface{}),
+		out: map[string]interface{}{"T": interface{}(nil)},
+	},
 
 	// composite tests
 	{in: allValueIndent, ptr: new(All), out: allValue},
@@ -304,14 +346,22 @@ var unmarshalTests = []unmarshalTest{
 	{in: pallValueCompact, ptr: new(*All), out: &pallValue},
 
 	// unmarshal interface test
-	{in: `{"T":false}`, ptr: &um0, out: umtrue}, // use "false" so test will fail if custom unmarshaler is not called
+	{
+		in:  `{"T":false}`,
+		ptr: &um0,
+		out: umtrue,
+	}, // use "false" so test will fail if custom unmarshaler is not called
 	{in: `{"T":false}`, ptr: &ump, out: &umtrue},
 	{in: `[{"T":false}]`, ptr: &umslice, out: umslice},
 	{in: `[{"T":false}]`, ptr: &umslicep, out: &umslice},
 	{in: `{"M":{"T":false}}`, ptr: &umstruct, out: umstruct},
 
 	// UnmarshalText interface test
-	{in: `"X"`, ptr: &um0T, out: umtrueT}, // use "false" so test will fail if custom unmarshaler is not called
+	{
+		in:  `"X"`,
+		ptr: &um0T,
+		out: umtrueT,
+	}, // use "false" so test will fail if custom unmarshaler is not called
 	{in: `"X"`, ptr: &umpT, out: &umtrueT},
 	{in: `["X"]`, ptr: &umsliceT, out: umsliceT},
 	{in: `["X"]`, ptr: &umslicepT, out: &umsliceT},
@@ -575,7 +625,12 @@ func TestUnmarshal(t *testing.T) {
 				continue
 			}
 			if !reflect.DeepEqual(v.Elem().Interface(), vv.Elem().Interface()) {
-				t.Errorf("#%d: mismatch\nhave: %#+v\nwant: %#+v", i, v.Elem().Interface(), vv.Elem().Interface())
+				t.Errorf(
+					"#%d: mismatch\nhave: %#+v\nwant: %#+v",
+					i,
+					v.Elem().Interface(),
+					vv.Elem().Interface(),
+				)
 				t.Errorf("     In: %q", strings.Map(noSpace, string(in)))
 				t.Errorf("Marshal: %q", strings.Map(noSpace, string(enc)))
 				continue
@@ -612,10 +667,14 @@ var numberTests = []struct {
 }{
 	{in: "-1.23e1", intErr: "strconv.ParseInt: parsing \"-1.23e1\": invalid syntax", f: -1.23e1},
 	{in: "-12", i: -12, f: -12.0},
-	{in: "1e1000", intErr: "strconv.ParseInt: parsing \"1e1000\": invalid syntax", floatErr: "strconv.ParseFloat: parsing \"1e1000\": value out of range"},
+	{
+		in:       "1e1000",
+		intErr:   "strconv.ParseInt: parsing \"1e1000\": invalid syntax",
+		floatErr: "strconv.ParseFloat: parsing \"1e1000\": value out of range",
+	},
 }
 
-// Independent of Decode, basic coverage of the accessors in Number
+// Independent of Decode, basic coverage of the accessors in Number.
 func TestNumberAccessors(t *testing.T) {
 	testtype.SkipUnlessTestType(t, testtype.UnitTestType)
 
@@ -712,9 +771,18 @@ type wrongStringTest struct {
 }
 
 var wrongStringTests = []wrongStringTest{
-	{`{"result":"x"}`, `json: invalid use of ,string struct tag, trying to unmarshal "x" into string`},
-	{`{"result":"foo"}`, `json: invalid use of ,string struct tag, trying to unmarshal "foo" into string`},
-	{`{"result":"123"}`, `json: invalid use of ,string struct tag, trying to unmarshal "123" into string`},
+	{
+		`{"result":"x"}`,
+		`json: invalid use of ,string struct tag, trying to unmarshal "x" into string`,
+	},
+	{
+		`{"result":"foo"}`,
+		`json: invalid use of ,string struct tag, trying to unmarshal "foo" into string`,
+	},
+	{
+		`{"result":"123"}`,
+		`json: invalid use of ,string struct tag, trying to unmarshal "123" into string`,
+	},
 }
 
 // If people misuse the ,string modifier, the error message should be
@@ -805,6 +873,7 @@ type All struct {
 	Interface  interface{}
 	PInterface *interface{}
 
+	//nolint:unused
 	unexported int
 }
 
@@ -1083,7 +1152,7 @@ func TestRefUnmarshal(t *testing.T) {
 }
 
 // Test that the empty string doesn't panic decoding when ,string is specified
-// Issue 3450
+// Issue 3450.
 func TestEmptyString(t *testing.T) {
 	testtype.SkipUnlessTestType(t, testtype.UnitTestType)
 
@@ -1104,7 +1173,7 @@ func TestEmptyString(t *testing.T) {
 }
 
 // Test that the returned error is non-nil when trying to unmarshal null string into int, for successive ,string option
-// Issue 7046
+// Issue 7046.
 func TestNullString(t *testing.T) {
 	testtype.SkipUnlessTestType(t, testtype.UnitTestType)
 
@@ -1169,7 +1238,7 @@ func TestInterfaceSet(t *testing.T) {
 }
 
 // JSON null values should be ignored for primitives and string values instead of resulting in an error.
-// Issue 2540
+// Issue 2540.
 func TestUnmarshalNulls(t *testing.T) {
 	testtype.SkipUnlessTestType(t, testtype.UnitTestType)
 
@@ -1209,9 +1278,20 @@ func TestUnmarshalNulls(t *testing.T) {
 	if err != nil {
 		t.Errorf("Unmarshal of null values failed: %v", err)
 	}
-	if !nulls.Bool || nulls.Int != 2 || nulls.Int8 != 3 || nulls.Int16 != 4 || nulls.Int32 != 5 || nulls.Int64 != 6 ||
-		nulls.Uint != 7 || nulls.Uint8 != 8 || nulls.Uint16 != 9 || nulls.Uint32 != 10 || nulls.Uint64 != 11 ||
-		nulls.Float32 != 12.1 || nulls.Float64 != 13.1 || nulls.String != "14" {
+	if !nulls.Bool ||
+		nulls.Int != 2 ||
+		nulls.Int8 != 3 ||
+		nulls.Int16 != 4 ||
+		nulls.Int32 != 5 ||
+		nulls.Int64 != 6 ||
+		nulls.Uint != 7 ||
+		nulls.Uint8 != 8 ||
+		nulls.Uint16 != 9 ||
+		nulls.Uint32 != 10 ||
+		nulls.Uint64 != 11 ||
+		nulls.Float32 != 12.1 ||
+		nulls.Float64 != 13.1 ||
+		nulls.String != "14" {
 
 		t.Errorf("Unmarshal of null values affected primitives")
 	}
@@ -1229,7 +1309,7 @@ func TestStringKind(t *testing.T) {
 
 	data, err := Marshal(m1)
 	if err != nil {
-		t.Errorf("Unexpected error marshalling: %v", err)
+		t.Errorf("Unexpected error marshaling: %v", err)
 	}
 
 	err = Unmarshal(data, &m2)
@@ -1291,11 +1371,13 @@ func TestUnmarshalSyntax(t *testing.T) {
 }
 
 // Test handling of unexported fields that should be ignored.
-// Issue 4660
+// Issue 4660.
 type unexportedFields struct {
 	Name string
-	m    map[string]interface{}
-	m2   map[string]interface{}
+	//nolint:unused
+	m map[string]interface{}
+	//nolint:unused
+	m2 map[string]interface{}
 }
 
 func TestUnmarshalUnexported(t *testing.T) {
@@ -1345,7 +1427,7 @@ func TestUnmarshalJSONLiteralError(t *testing.T) {
 
 // Test that extra object elements in an array do not result in a
 // "data changing underfoot" error.
-// Issue 3717
+// Issue 3717.
 func TestSkipArrayObjects(t *testing.T) {
 	testtype.SkipUnlessTestType(t, testtype.UnitTestType)
 

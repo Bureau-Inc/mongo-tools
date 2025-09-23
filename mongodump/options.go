@@ -8,7 +8,7 @@ package mongodump
 
 import (
 	"fmt"
-	"io/ioutil"
+	"os"
 
 	"github.com/mongodb/mongo-tools/common/options"
 )
@@ -25,10 +25,11 @@ See http://docs.mongodb.com/database-tools/mongodump/ for more information.`
 
 // InputOptions defines the set of options to use in retrieving data from the server.
 type InputOptions struct {
-	Query          string `long:"query" short:"q" description:"query filter, as a v2 Extended JSON string, e.g., '{\"x\":{\"$gt\":1}}'"`
-	QueryFile      string `long:"queryFile" description:"path to a file containing a query filter (v2 Extended JSON)"`
-	ReadPreference string `long:"readPreference" value-name:"<string>|<json>" description:"specify either a preference mode (e.g. 'nearest') or a preference json object (e.g. '{mode: \"nearest\", tagSets: [{a: \"b\"}], maxStalenessSeconds: 123}')"`
-	TableScan      bool   `long:"forceTableScan" description:"force a table scan (do not use $snapshot or hint _id). Deprecated since this is default behavior on WiredTiger"`
+	Query                   string `long:"query" short:"q" description:"query filter, as a v2 Extended JSON string, e.g., '{\"x\":{\"$gt\":1}}'"`
+	QueryFile               string `long:"queryFile" description:"path to a file containing a query filter (v2 Extended JSON)"`
+	ReadPreference          string `long:"readPreference" value-name:"<string>|<json>" description:"specify either a preference mode (e.g. 'nearest') or a preference json object (e.g. '{mode: \"nearest\", tagSets: [{a: \"b\"}], maxStalenessSeconds: 123}')"`
+	TableScan               bool   `long:"forceTableScan" description:"force a table scan (do not use $snapshot or hint _id). Deprecated since this is default behavior on WiredTiger"`
+	SourceWritesDoneBarrier string `long:"internalOnlySourceWritesDoneBarrier" hidden:"true"`
 }
 
 // Name returns a human-readable group name for input options.
@@ -44,7 +45,7 @@ func (inputOptions *InputOptions) GetQuery() ([]byte, error) {
 	if inputOptions.Query != "" {
 		return []byte(inputOptions.Query), nil
 	} else if inputOptions.QueryFile != "" {
-		content, err := ioutil.ReadFile(inputOptions.QueryFile)
+		content, err := os.ReadFile(inputOptions.QueryFile)
 		if err != nil {
 			err = fmt.Errorf("error reading queryFile: %s", err)
 		}
@@ -57,7 +58,7 @@ func (inputOptions *InputOptions) GetQuery() ([]byte, error) {
 type OutputOptions struct {
 	Out                        string   `long:"out" value-name:"<directory-path>" short:"o" description:"output directory, or '-' for stdout (default: 'dump')"`
 	Gzip                       bool     `long:"gzip" description:"compress archive or collection output with Gzip"`
-	Oplog                      bool     `long:"oplog" description:"use oplog for taking a point-in-time snapshot"`
+	Oplog                      bool     `long:"oplog" description:"for taking a point-in-time snapshot on a replica set that is not part of a sharded cluster."`
 	Archive                    string   `long:"archive" value-name:"<file-path>" optional:"true" optional-value:"-" description:"dump as an archive to the specified path. If flag is specified without a value, archive is written to stdout"`
 	DumpDBUsersAndRoles        bool     `long:"dumpDbUsersAndRoles" description:"dump user and role definitions for the specified database"`
 	ExcludedCollections        []string `long:"excludeCollection" value-name:"<collection-name>" description:"collection to exclude from the dump (may be specified multiple times to exclude additional collections)"`
@@ -78,7 +79,14 @@ type Options struct {
 }
 
 func ParseOptions(rawArgs []string, versionStr, gitCommit string) (Options, error) {
-	opts := options.New("mongodump", versionStr, gitCommit, Usage, true, options.EnabledOptions{Auth: true, Connection: true, Namespace: true, URI: true})
+	opts := options.New(
+		"mongodump",
+		versionStr,
+		gitCommit,
+		Usage,
+		true,
+		options.EnabledOptions{Auth: true, Connection: true, Namespace: true, URI: true},
+	)
 
 	inputOpts := &InputOptions{}
 	opts.AddOptions(inputOpts)

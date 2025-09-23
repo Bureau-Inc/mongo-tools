@@ -5,7 +5,7 @@
 // a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
 //
 // Based on github.com/golang/go by The Go Authors
-// See THIRD-PARTY-NOTICES for original license terms.
+// See cyclonedx.sbom.json for original license terms.
 
 package json_test
 
@@ -163,8 +163,12 @@ func TestIndent(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	json.Indent(&out, b, "=", "\t")
-	out.WriteTo(os.Stdout)
+	if err = json.Indent(&out, b, "=", "\t"); err != nil {
+		log.Fatal(err)
+	}
+	if _, err = out.WriteTo(os.Stdout); err != nil {
+		log.Fatal(err)
+	}
 	// Output:
 	// [
 	// =	{

@@ -1,0 +1,75 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - dupword
+    - errcheck
+    - gocheckcompilerdirectives
+    - godot
+    - ineffassign
+    - misspell
+    - nolintlint
+    - staticcheck
+    - unconvert
+    - unparam
+    - unused
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+
+    misspell:
+      locale: US
+      extra-words:
+        - typo: cancelation
+          correction: cancellation
+        - typo: cancelations
+          correction: cancellations
+        - typo: cancelling
+          correction: canceling
+        - typo: cancelled
+          correction: canceled
+
+    staticcheck:
+      # Default: ["all", "-ST1000", "-ST1003", "-ST1016", "-ST1020", "-ST1021", "-ST1022"]
+      checks:
+        - "-S1007"
+        - "-ST1005"
+
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - staticcheck
+        path: \.go$
+        text: is deprecated
+      - path: (.+)\.go$
+        text: "composites: .+(primitive.(Binary|Decimal128|E|Timestamp)|types.(Destination|Source)(Client|Database)) struct literal uses unkeyed fields"
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+
+formatters:
+  enable:
+    - gci
+    - goimports
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+
+issues:
+  max-same-issues: 0

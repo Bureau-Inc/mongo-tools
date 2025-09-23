@@ -5,7 +5,7 @@
 // a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
 //
 // Based on github.com/golang/go by The Go Authors
-// See THIRD-PARTY-NOTICES for original license terms.
+// See cyclonedx.sbom.json for original license terms.
 
 package json
 
@@ -180,7 +180,10 @@ type indentErrorTest struct {
 
 var indentErrorTests = []indentErrorTest{
 	{`{"X": "foo", "Y"}`, &SyntaxError{"invalid character '}' after object key", 17}},
-	{`{"X": "foo" "Y": "bar"}`, &SyntaxError{"invalid character '\"' after object key:value pair", 13}},
+	{
+		`{"X": "foo" "Y": "bar"}`,
+		&SyntaxError{"invalid character '\"' after object key:value pair", 13},
+	},
 }
 
 func TestIndentErrors(t *testing.T) {
@@ -233,6 +236,7 @@ func BenchmarkSkipValue(b *testing.B) {
 
 	initBig()
 	for i := 0; i < b.N; i++ {
+		//nolint:errcheck
 		nextValue(jsonBig, &benchScan)
 	}
 	b.SetBytes(int64(len(jsonBig)))

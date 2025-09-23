@@ -149,7 +149,7 @@ func getStorageEngine(stat *ServerStatus) string {
 	return val
 }
 
-// mongosProcessRE matches mongos not followed by any slashes before next whitespace
+// mongosProcessRE matches mongos not followed by any slashes before next whitespace.
 var mongosProcessRE = regexp.MustCompile(`^.*\bmongos\b[^\\\/]*(\s.*)?$`)
 
 func IsMongos(stat *ServerStatus) bool {
@@ -210,7 +210,10 @@ func ReadDelete(_ *ReaderConfig, newStat, oldStat *ServerStatus) string {
 
 func ReadGetMore(_ *ReaderConfig, newStat, oldStat *ServerStatus) string {
 	sampleSecs := float64(newStat.SampleTime.Sub(oldStat.SampleTime).Seconds())
-	return fmt.Sprintf("%d", diff(newStat.Opcounters.GetMore, oldStat.Opcounters.GetMore, sampleSecs))
+	return fmt.Sprintf(
+		"%d",
+		diff(newStat.Opcounters.GetMore, oldStat.Opcounters.GetMore, sampleSecs),
+	)
 }
 
 func ReadCommand(_ *ReaderConfig, newStat, oldStat *ServerStatus) string {
@@ -286,16 +289,8 @@ func ReadNonMapped(c *ReaderConfig, newStat, _ *ServerStatus) (val string) {
 }
 
 func ReadFaults(_ *ReaderConfig, newStat, oldStat *ServerStatus) string {
-	if !IsMMAP(newStat) {
-		return "n/a"
-	}
-	var val int64 = -1
-	if oldStat.ExtraInfo != nil && newStat.ExtraInfo != nil &&
-		oldStat.ExtraInfo.PageFaults != nil && newStat.ExtraInfo.PageFaults != nil {
-		sampleSecs := float64(newStat.SampleTime.Sub(oldStat.SampleTime).Seconds())
-		val = diff(*(newStat.ExtraInfo.PageFaults), *(oldStat.ExtraInfo.PageFaults), sampleSecs)
-	}
-	return fmt.Sprintf("%d", val)
+	// This was here for MMAPv1.
+	return "n/a"
 }
 
 func ReadLRW(_ *ReaderConfig, newStat, oldStat *ServerStatus) (val string) {
@@ -304,7 +299,8 @@ func ReadLRW(_ *ReaderConfig, newStat, oldStat *ServerStatus) (val string) {
 		if ok && global.AcquireCount != nil {
 			newColl, inNew := newStat.Locks["Collection"]
 			oldColl, inOld := oldStat.Locks["Collection"]
-			if inNew && inOld && newColl.AcquireWaitCount != nil && oldColl.AcquireWaitCount != nil {
+			if inNew && inOld && newColl.AcquireWaitCount != nil &&
+				oldColl.AcquireWaitCount != nil {
 				rWait := newColl.AcquireWaitCount.Read - oldColl.AcquireWaitCount.Read
 				wWait := newColl.AcquireWaitCount.Write - oldColl.AcquireWaitCount.Write
 				rTotal := newColl.AcquireCount.Read - oldColl.AcquireCount.Read
@@ -324,7 +320,8 @@ func ReadLRWT(_ *ReaderConfig, newStat, oldStat *ServerStatus) (val string) {
 		if ok && global.AcquireCount != nil {
 			newColl, inNew := newStat.Locks["Collection"]
 			oldColl, inOld := oldStat.Locks["Collection"]
-			if inNew && inOld && newColl.AcquireWaitCount != nil && oldColl.AcquireWaitCount != nil {
+			if inNew && inOld && newColl.AcquireWaitCount != nil &&
+				oldColl.AcquireWaitCount != nil {
 				rWait := newColl.AcquireWaitCount.Read - oldColl.AcquireWaitCount.Read
 				wWait := newColl.AcquireWaitCount.Write - oldColl.AcquireWaitCount.Write
 				rAcquire := newColl.TimeAcquiringMicros.Read - oldColl.TimeAcquiringMicros.Read
@@ -349,7 +346,10 @@ func ReadLockedDB(_ *ReaderConfig, newStat, oldStat *ServerStatus) (val string) 
 			var percentage string
 			if len(lockdiffs) == 0 {
 				if newStat.GlobalLock != nil {
-					percentage = fmt.Sprintf("%.1f", percentageInt64(newStat.GlobalLock.LockTime, newStat.GlobalLock.TotalTime))
+					percentage = fmt.Sprintf(
+						"%.1f",
+						percentageInt64(newStat.GlobalLock.LockTime, newStat.GlobalLock.TotalTime),
+					)
 				}
 			} else {
 				// Get the entry with the highest lock

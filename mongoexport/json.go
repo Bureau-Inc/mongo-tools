@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"io"
 
+	"github.com/mongodb/mongo-tools/common/bsonutil"
 	"github.com/mongodb/mongo-tools/common/json"
 	"go.mongodb.org/mongo-driver/bson"
 )
@@ -29,7 +30,12 @@ type JSONExportOutput struct {
 
 // NewJSONExportOutput creates a new JSONExportOutput in array mode if specified,
 // configured to write data to the given io.Writer.
-func NewJSONExportOutput(arrayOutput bool, prettyOutput bool, out io.Writer, jsonFormat JSONFormat) *JSONExportOutput {
+func NewJSONExportOutput(
+	arrayOutput bool,
+	prettyOutput bool,
+	out io.Writer,
+	jsonFormat JSONFormat,
+) *JSONExportOutput {
 	return &JSONExportOutput{
 		arrayOutput,
 		prettyOutput,
@@ -92,7 +98,11 @@ func (jsonExporter *JSONExportOutput) ExportDocument(document bson.D) error {
 			}
 		}
 
-		jsonOut, err := bson.MarshalExtJSON(document, jsonExporter.JSONFormat == Canonical, false)
+		jsonOut, err := bsonutil.MarshalExtJSONReversible(
+			document,
+			jsonExporter.JSONFormat == Canonical,
+			false,
+		)
 		if err != nil {
 			return err
 		}
@@ -109,7 +119,7 @@ func (jsonExporter *JSONExportOutput) ExportDocument(document bson.D) error {
 			return err
 		}
 	} else {
-		extendedDoc, err := bson.MarshalExtJSON(document, jsonExporter.JSONFormat == Canonical, false)
+		extendedDoc, err := bsonutil.MarshalExtJSONReversible(document, jsonExporter.JSONFormat == Canonical, false)
 		if err != nil {
 			return err
 		}

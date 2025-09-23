@@ -5,7 +5,7 @@
 // a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
 //
 // Based on github.com/golang/go by The Go Authors
-// See THIRD-PARTY-NOTICES for original license terms.
+// See cyclonedx.sbom.json for original license terms.
 
 // Large data benchmark.
 // The JSON data is a summary of agl's changes in the
@@ -18,7 +18,7 @@ package json
 import (
 	"bytes"
 	"compress/gzip"
-	"io/ioutil"
+	"io"
 	"os"
 	"testing"
 
@@ -53,7 +53,7 @@ func codeInit() {
 	if err != nil {
 		panic(err)
 	}
-	data, err := ioutil.ReadAll(gz)
+	data, err := io.ReadAll(gz)
 	if err != nil {
 		panic(err)
 	}
@@ -90,7 +90,7 @@ func BenchmarkCodeEncoder(b *testing.B) {
 		codeInit()
 		b.StartTimer()
 	}
-	enc := NewEncoder(ioutil.Discard)
+	enc := NewEncoder(io.Discard)
 	for i := 0; i < b.N; i++ {
 		if err := enc.Encode(&codeStruct); err != nil {
 			b.Fatal("Encode:", err)

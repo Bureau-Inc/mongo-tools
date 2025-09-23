@@ -97,12 +97,12 @@ func TestDateBSONToJSON(t *testing.T) {
 	testtype.SkipUnlessTestType(t, testtype.UnitTestType)
 
 	timeNow := time.Now()
-	secs := int64(timeNow.Unix())
+	secs := timeNow.Unix()
 	nanosecs := timeNow.Nanosecond()
 	millis := int64(nanosecs / 1e6)
 
-	timeNowSecs := time.Unix(secs, int64(0))
-	timeNowMillis := time.Unix(secs, int64(millis*1e6))
+	timeNowSecs := time.Unix(secs, 0)
+	timeNowMillis := time.Unix(secs, millis*1e6)
 
 	Convey("Converting BSON time.Time 's dates to JSON", t, func() {
 		// json.Date is stored as an int64 representing the number of milliseconds since the epoch
@@ -252,7 +252,9 @@ func TestBinaryBSONToJSON(t *testing.T) {
 
 	Convey("Converting BSON Binary data to JSON", t, func() {
 		Convey("should produce a json.BinData", func() {
-			_jObj, err := ConvertBSONValueToLegacyExtJSON(primitive.Binary{'\x01', []byte("\x05\x20\x02\xae\xf7")})
+			_jObj, err := ConvertBSONValueToLegacyExtJSON(
+				primitive.Binary{'\x01', []byte("\x05\x20\x02\xae\xf7")},
+			)
 			So(err, ShouldBeNil)
 			jObj, ok := _jObj.(json.BinData)
 			So(ok, ShouldBeTrue)
@@ -299,7 +301,9 @@ func TestDBPointerBSONToJSON(t *testing.T) {
 	Convey("Converting BSON DBPointer to JSON", t, func() {
 		Convey("should produce a json.DBPointer", func() {
 			objId := primitive.NewObjectID()
-			_jObj, err := ConvertBSONValueToLegacyExtJSON(primitive.DBPointer{"dbrefnamespace", objId})
+			_jObj, err := ConvertBSONValueToLegacyExtJSON(
+				primitive.DBPointer{"dbrefnamespace", objId},
+			)
 			So(err, ShouldBeNil)
 			jObj, ok := _jObj.(json.DBPointer)
 			So(ok, ShouldBeTrue)
@@ -315,7 +319,9 @@ func TestJSCodeBSONToJSON(t *testing.T) {
 	Convey("Converting BSON Javascript code to JSON", t, func() {
 		Convey("should produce a json.Javascript", func() {
 			Convey("without scope if the scope for the BSON Javascript code is nil", func() {
-				_jObj, err := ConvertBSONValueToLegacyExtJSON(primitive.CodeWithScope{"function() { return null; }", nil})
+				_jObj, err := ConvertBSONValueToLegacyExtJSON(
+					primitive.CodeWithScope{"function() { return null; }", nil},
+				)
 				So(err, ShouldBeNil)
 				jObj, ok := _jObj.(json.JavaScript)
 				So(ok, ShouldBeTrue)
@@ -324,11 +330,17 @@ func TestJSCodeBSONToJSON(t *testing.T) {
 			})
 
 			Convey("with scope if the scope for the BSON Javascript code is non-nil", func() {
-				_jObj, err := ConvertBSONValueToLegacyExtJSON(primitive.CodeWithScope{"function() { return x; }", bson.M{"x": 2}})
+				_jObj, err := ConvertBSONValueToLegacyExtJSON(
+					primitive.CodeWithScope{"function() { return x; }", bson.M{"x": 2}},
+				)
 				So(err, ShouldBeNil)
 				jObj, ok := _jObj.(json.JavaScript)
 				So(ok, ShouldBeTrue)
-				So(jObj.Scope.(bson.M)["x"], ShouldEqual, 2)
+
+				scopeMap, ok := jObj.Scope.(bson.M)
+				So(ok, ShouldBeTrue)
+
+				So(scopeMap["x"], ShouldEqual, 2)
 				So(jObj.Code, ShouldEqual, "function() { return x; }")
 			})
 		})

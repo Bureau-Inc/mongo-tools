@@ -1,12 +1,14 @@
 package bsonutil
 
 import (
+	"math"
+	"testing"
+	"time"
+
 	"github.com/mongodb/mongo-tools/common/testtype"
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
-
-	"testing"
 )
 
 func TestBson2Float64(t *testing.T) {
@@ -43,7 +45,7 @@ func TestBson2Float64(t *testing.T) {
 // clear if this can actually happen in practice. Internally, these errors can
 // only occur when the call to `bson.Marshal()` fails. But the type signature
 // for IsEqual means that we are always passing `bson.D` values to
-// `bson.Marshal()`, and I don't think those can cause marshalling errors.
+// `bson.Marshal()`, and I don't think those can cause marshaling errors.
 func TestIsEqual(t *testing.T) {
 	testtype.SkipUnlessTestType(t, testtype.UnitTestType)
 
@@ -95,5 +97,89 @@ func TestIsEqual(t *testing.T) {
 				assert.False(isEq)
 			}
 		}
+	}
+}
+
+func TestMarshalExtJSONReversible(t *testing.T) {
+	testtype.SkipUnlessTestType(t, testtype.UnitTestType)
+
+	tests := []struct {
+		val          any
+		reversible   bool
+		expectedJSON string
+	}{
+		{
+			bson.M{"field1": bson.M{"$date": 1257894000000}},
+			true,
+			`{"field1":{"$date":{"$numberLong":"1257894000000"}}}`,
+		},
+		{
+			bson.M{"field1": time.Unix(1257894000, 0)},
+			true,
+			`{"field1":{"$date":{"$numberLong":"1257894000000"}}}`,
+		},
+		{
+			bson.M{"field1": bson.M{"$date": "invalid"}},
+			false,
+			``,
+		},
+	}
+
+	for _, test := range tests {
+		json, err := MarshalExtJSONReversible(
+			test.val,
+			true,  /* canonical */
+			false, /* escapeHTML */
+		)
+		if !test.reversible {
+			assert.ErrorContains(t, err, "marshal is not reversible")
+		} else {
+			assert.NoError(t, err)
+		}
+		assert.Equal(t, test.expectedJSON, string(json))
+	}
+}
+
+func TestMarshalExtJSONWithBSONRoundtripConsistency(t *testing.T) {
+	testtype.SkipUnlessTestType(t, testtype.UnitTestType)
+
+	tests := []struct {
+		val                          any
+		consistentAfterRoundtripping bool
+		expectedJSON                 string
+	}{
+		{
+			bson.M{"field1": bson.M{"grapes": int64(123)}},
+			true,
+			`{"field1":{"grapes":{"$numberLong":"123"}}}`,
+		},
+		{
+			bson.M{"field1": bson.M{"$date": 1257894000000}},
+			false,
+			``,
+		},
+		{
+			bson.M{"field1": bson.M{"nanField": math.NaN()}},
+			true,
+			`{"field1":{"nanField":{"$numberDouble":"NaN"}}}`,
+		},
+	}
+
+	for _, test := range tests {
+		json, err := MarshalExtJSONWithBSONRoundtripConsistency(
+			test.val,
+			true,  /* canonical */
+			false, /* escapeHTML */
+		)
+		if !test.consistentAfterRoundtripping {
+			assert.ErrorContains(
+				t,
+				err,
+				"marshaling BSON to ExtJSON and back resulted in discrepancies",
+			)
+		} else {
+			assert.NoError(t, err)
+		}
+		assert.Equal(t, test.expectedJSON, string(json))
 	}
 }
