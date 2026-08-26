@@ -1,0 +1,13 @@
+name: Dependency Catalog Check
+
+on:
+  push:
+    branches: ["master"]
+  pull_request:
+    branches: ["master"]
+
+jobs:
+  check:
+    uses: Bureau-Inc/bureau-bom/.github/workflows/bom-go-validation.yaml@main
+    with:
+      mode: warn
